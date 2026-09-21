@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Mecfinder Provider App</string>
+    <string name="title_activity_main">Mecfinder Provider App</string>
+    <string name="package_name">com.mecfinder.mechanic</string>
+    <string name="custom_url_scheme">com.mecfinder.mechanic</string>
+</resources>
