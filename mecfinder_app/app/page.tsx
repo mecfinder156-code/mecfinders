@@ -16,7 +16,7 @@ export default function SplashScreen() {
       } else if (!profile) {
         router.replace('/register');
       } else {
-        router.replace('/dashboard');
+        router.replace('/permissions');
       }
     }, 2000); // 2 second splash
     return () => clearTimeout(timer);

@@ -1,8 +1,14 @@
 'use strict';
 
+const mongoose = require('mongoose');
 const MechanicWallet = require('./wallet.model');
 const WalletTransaction = require('./walletTransaction.model');
-const { WALLET_TXN_DIRECTION, WALLET_TXN_TYPE } = require('../bookings/booking.constants');
+const {
+  WALLET_TXN_DIRECTION,
+  WALLET_TXN_TYPE,
+  PAYOUT_STATUS,
+  SETTLEMENT_STATUS,
+} = require('../bookings/booking.constants');
 const logger = require('../../utils/logger');
 
 /**
@@ -50,6 +56,11 @@ async function recordTransaction({
   affects = 'balance',
   reason = null,
   reference = null,
+  settlementStatus = undefined,
+  transferId = undefined,
+  payoutStatus = undefined,
+  payoutId = undefined,
+  paidOutAt = undefined,
   idempotencyKey,
 }) {
   if (!idempotencyKey) throw new Error('idempotencyKey is required for wallet writes');
@@ -69,6 +80,11 @@ async function recordTransaction({
       affects,
       reason,
       reference,
+      ...(settlementStatus !== undefined ? { settlementStatus } : {}),
+      ...(transferId !== undefined ? { transferId } : {}),
+      ...(payoutStatus !== undefined ? { payoutStatus } : {}),
+      ...(payoutId !== undefined ? { payoutId } : {}),
+      ...(paidOutAt !== undefined ? { paidOutAt } : {}),
       idempotencyKey,
     });
   } catch (err) {
@@ -115,13 +131,101 @@ async function getWallet(mechanicId) {
   return getOrCreateWallet(mechanicId);
 }
 
-async function getTransactions(mechanicId, { page = 1, limit = 20 } = {}) {
+async function getTransactions(mechanicId, { page = 1, limit = 20, from, to, type } = {}) {
   const skip = (page - 1) * limit;
+  const filter = { mechanicId };
+  if (type) filter.type = type;
+  const range = dateRange(from, to);
+  if (range) filter.createdAt = range;
   const [items, total] = await Promise.all([
-    WalletTransaction.find({ mechanicId }).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
-    WalletTransaction.countDocuments({ mechanicId }),
+    WalletTransaction.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    WalletTransaction.countDocuments(filter),
   ]);
   return { items, total, page, limit, pages: Math.ceil(total / limit) };
+}
+
+/** Build a Mongo date-range matcher from optional from/to (inclusive day bounds). */
+function dateRange(from, to) {
+  const range = {};
+  if (from) {
+    const d = new Date(from);
+    if (!Number.isNaN(d.getTime())) range.$gte = d;
+  }
+  if (to) {
+    const d = new Date(to);
+    if (!Number.isNaN(d.getTime())) {
+      // If a bare date (no time) was passed, include the whole day.
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(to))) d.setHours(23, 59, 59, 999);
+      range.$lte = d;
+    }
+  }
+  return Object.keys(range).length ? range : null;
+}
+
+/**
+ * Earnings/payout summary for a mechanic, derived from the immutable ledger so
+ * it never drifts. `lifetimeEarnings` counts every service earning (cash +
+ * online); the payable figures count only ONLINE earnings (payoutStatus set),
+ * which are the ones the platform holds and must pay out.
+ *
+ *   payableEarnings = online earnings total (UNPAID + PAID)
+ *   paidOut         = online earnings already settled to the mechanic
+ *   outstanding     = payableEarnings - paidOut   (what the admin still owes)
+ *
+ * An optional from/to scopes `earnedInRange` (by earning date) without changing
+ * the running outstanding figure.
+ */
+async function getEarningsSummary(mechanicId, { from, to } = {}) {
+  const byStatus = await WalletTransaction.aggregate([
+    {
+      $match: {
+        mechanicId: new mongoose.Types.ObjectId(String(mechanicId)),
+        type: WALLET_TXN_TYPE.SERVICE_EARNING,
+      },
+    },
+    {
+      $group: {
+        _id: '$payoutStatus',
+        total: { $sum: '$amount' },
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+
+  let lifetimeEarnings = 0;
+  let payableEarnings = 0;
+  let paidOut = 0;
+  let outstanding = 0;
+  let unpaidCount = 0;
+  for (const row of byStatus) {
+    lifetimeEarnings += row.total;
+    if (row._id === PAYOUT_STATUS.UNPAID) {
+      payableEarnings += row.total;
+      outstanding += row.total;
+      unpaidCount += row.count;
+    } else if (row._id === PAYOUT_STATUS.PAID) {
+      payableEarnings += row.total;
+      paidOut += row.total;
+    }
+  }
+
+  let earnedInRange = null;
+  const range = dateRange(from, to);
+  if (range) {
+    const scoped = await WalletTransaction.aggregate([
+      {
+        $match: {
+          mechanicId: new mongoose.Types.ObjectId(String(mechanicId)),
+          type: WALLET_TXN_TYPE.SERVICE_EARNING,
+          createdAt: range,
+        },
+      },
+      { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } },
+    ]);
+    earnedInRange = { total: scoped[0]?.total || 0, count: scoped[0]?.count || 0 };
+  }
+
+  return { lifetimeEarnings, payableEarnings, paidOut, outstanding, unpaidCount, earnedInRange };
 }
 
 /**
@@ -148,11 +252,54 @@ async function recomputeBalance(mechanicId) {
   return wallet;
 }
 
+/**
+ * Flip an ONLINE earning's settlement status (idempotent-ish: only advances a
+ * PROCESSING entry). SETTLED is the "your payout reached your bank" moment the
+ * mechanic sees in their wallet history. Matched by the earning's
+ * idempotencyKey (`earning:<bookingId>`) or by its Route transfer id.
+ */
+async function markEarningSettlement(match, status, { settledAt, transferId, reference } = {}) {
+  const query = match.idempotencyKey
+    ? { idempotencyKey: match.idempotencyKey }
+    : match.transferId
+    ? { transferId: match.transferId }
+    : null;
+  if (!query) return null;
+
+  const txn = await WalletTransaction.findOne(query);
+  if (!txn) return null;
+  // Only PROCESSING online earnings settle; never touch balance-affecting rows.
+  if (txn.settlementStatus === SETTLEMENT_STATUS.NA) return txn;
+  if (txn.settlementStatus === SETTLEMENT_STATUS.SETTLED) return txn; // already done
+
+  txn.settlementStatus = status;
+  if (status === SETTLEMENT_STATUS.SETTLED) {
+    txn.settledAt = settledAt || new Date();
+    txn.reason = 'Service earning settled to your bank';
+  }
+  if (transferId) txn.transferId = transferId;
+  if (reference) txn.reference = reference;
+  await txn.save();
+  return txn;
+}
+
+/**
+ * Net platform due (rupees) the mechanic currently owes — the magnitude of a
+ * negative wallet balance, or 0 when the balance is non-negative.
+ */
+async function getDueAmount(mechanicId) {
+  const wallet = await getOrCreateWallet(mechanicId);
+  return wallet.balance < 0 ? Math.abs(wallet.balance) : 0;
+}
+
 module.exports = {
   getOrCreateWallet,
   getWallet,
   recordTransaction,
   recordMany,
   getTransactions,
+  getEarningsSummary,
   recomputeBalance,
+  markEarningSettlement,
+  getDueAmount,
 };

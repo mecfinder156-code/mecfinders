@@ -26,8 +26,12 @@ const app = require('../src/app');
 const h = require('./helpers/mobile.helper');
 const dispatchService = require('../src/modules/bookings/dispatch.service');
 const walletService = require('../src/modules/wallet/wallet.service');
+const adminWalletService = require('../src/modules/wallet/adminWallet.service');
 const paymentService = require('../src/modules/payments/payment.service');
 const BookingPayment = require('../src/modules/payments/bookingPayment.model');
+const WalletTransaction = require('../src/modules/wallet/walletTransaction.model');
+const MechanicPayout = require('../src/modules/wallet/payout.model');
+const DueSettlement = require('../src/modules/wallet/dueSettlement.model');
 const Booking = require('../src/modules/bookings/booking.model');
 const MechanicRequest = require('../src/modules/bookings/mechanicRequest.model');
 const User = require('../src/modules/users/models/user.model');
@@ -35,6 +39,8 @@ const {
   REQUEST_STATUS,
   WALLET_TXN_TYPE,
   WALLET_TXN_DIRECTION,
+  PAYOUT_STATUS,
+  SETTLEMENT_STATUS,
 } = require('../src/modules/bookings/booking.constants');
 
 let passed = 0;
@@ -249,7 +255,7 @@ async function main() {
     assert.strictEqual(wallet.lifetimeEarnings, s.pricing.servicePrice);
   });
 
-  await scenario('online (razorpay) payment credits provider earning (+ve) to wallet', async () => {
+  await scenario('online (razorpay) payment records an UNPAID payable earning, cash balance untouched', async () => {
     const s = await scaffold();
     const { bookingId, mech } = await toWorkStarted(s);
     await request(app).post(`/api/mobile/mechanic/bookings/${bookingId}/complete`).set(h.authHeader(mech));
@@ -270,10 +276,101 @@ async function main() {
     await paymentService.finalizePaidBooking(booking, payment, null);
     const after = await Booking.findById(bookingId);
     assert.strictEqual(after.status, 'COMPLETED');
+
+    // Platform holds the money; the cash-due balance is untouched.
     const wallet = await walletService.getWallet(mech._id);
-    // Online: platform owes mechanic their earning -> positive balance.
-    assert.strictEqual(wallet.balance, s.pricing.servicePrice);
+    assert.strictEqual(wallet.balance, 0);
+    // The earning is recorded as an UNPAID payable (admin pays it out later).
+    const earning = await WalletTransaction.findOne({ idempotencyKey: `earning:${bookingId}` });
+    assert.ok(earning, 'earning ledger entry exists');
+    assert.strictEqual(earning.affects, 'none');
+    assert.strictEqual(earning.amount, s.pricing.servicePrice);
+    assert.strictEqual(earning.payoutStatus, PAYOUT_STATUS.UNPAID);
     assert.strictEqual(wallet.lifetimeEarnings, s.pricing.servicePrice);
+    // Summary reflects the outstanding payable.
+    const summary = await walletService.getEarningsSummary(mech._id);
+    assert.strictEqual(summary.payableEarnings, s.pricing.servicePrice);
+    assert.strictEqual(summary.outstanding, s.pricing.servicePrice);
+    assert.strictEqual(summary.paidOut, 0);
+  });
+
+  await scenario('admin payout settles the online earning -> outstanding drops to zero', async () => {
+    const s = await scaffold();
+    const { bookingId, mech } = await toWorkStarted(s);
+    await request(app).post(`/api/mobile/mechanic/bookings/${bookingId}/complete`).set(h.authHeader(mech));
+    const booking = await Booking.findById(bookingId);
+    booking.status = 'PAYMENT_PENDING';
+    booking.paymentMethod = 'RAZORPAY';
+    await booking.save();
+    const payment = await BookingPayment.create({
+      bookingId: booking._id,
+      customerId: booking.customerId,
+      mechanicId: booking.mechanicId,
+      method: 'RAZORPAY',
+      status: 'PAID',
+      amount: booking.bill.totalAmount,
+      razorpayPaymentId: `pay_test_${bookingId}`,
+    });
+    await paymentService.finalizePaidBooking(booking, payment, null);
+
+    // Admin settles all outstanding earnings for this mechanic.
+    const { payout, summary } = await adminWalletService.createPayout(
+      mech._id,
+      { settleAll: true, method: 'BANK_TRANSFER', reference: 'UTR123', note: 'weekly payout' },
+      null
+    );
+    assert.strictEqual(payout.amount, s.pricing.servicePrice);
+    assert.strictEqual(payout.earningsCount, 1);
+    assert.strictEqual(summary.outstanding, 0);
+    assert.strictEqual(summary.paidOut, s.pricing.servicePrice);
+
+    // The earning is now PAID and linked to the payout.
+    const earning = await WalletTransaction.findOne({ idempotencyKey: `earning:${bookingId}` });
+    assert.strictEqual(earning.payoutStatus, PAYOUT_STATUS.PAID);
+    assert.ok(earning.payoutId, 'earning linked to payout');
+    assert.ok(earning.paidOutAt, 'paidOutAt stamped');
+    // A PAYOUT ledger entry was appended for the audit trail.
+    const payoutTxn = await WalletTransaction.findOne({ idempotencyKey: `payout:${payout._id}` });
+    assert.ok(payoutTxn, 'payout ledger entry exists');
+    assert.strictEqual(payoutTxn.type, WALLET_TXN_TYPE.PAYOUT);
+
+    // Nothing left to settle: a second settle-all is rejected.
+    let threw = false;
+    try {
+      await adminWalletService.createPayout(mech._id, { settleAll: true }, null);
+    } catch (e) {
+      threw = true;
+    }
+    assert.ok(threw, 'second settle-all with nothing outstanding is rejected');
+    assert.strictEqual(await MechanicPayout.countDocuments({ mechanicId: mech._id }), 1);
+  });
+
+  await scenario('cash due can be cleared online -> balance returns to zero', async () => {
+    const s = await scaffold();
+    const { bookingId, mech } = await toWorkStarted(s);
+    await request(app).post(`/api/mobile/mechanic/bookings/${bookingId}/complete`).set(h.authHeader(mech));
+    await request(app).post(`/api/mobile/bookings/${bookingId}/pay`).set(h.authHeader(s.customer)).send({ method: 'CASH' }).expect(200);
+    await request(app).post(`/api/mobile/mechanic/bookings/${bookingId}/collect-cash`).set(h.authHeader(mech)).expect(200);
+    const company = s.pricing.gstAmount + s.pricing.platformFee;
+    let wallet = await walletService.getWallet(mech._id);
+    assert.strictEqual(wallet.balance, -company);
+    assert.strictEqual(await walletService.getDueAmount(mech._id), company);
+
+    // Mechanic pays their due online. Simulate the DueSettlement + finalize.
+    const settlement = await DueSettlement.create({
+      mechanicId: mech._id,
+      amount: company,
+      status: 'PENDING',
+      razorpayOrderId: `order_due_${mech._id}`,
+    });
+    await paymentService.finalizeDueSettlement(settlement, { paymentId: `pay_due_${mech._id}` });
+    wallet = await walletService.getWallet(mech._id);
+    assert.strictEqual(wallet.balance, 0);
+    assert.strictEqual(await walletService.getDueAmount(mech._id), 0);
+    // Idempotent: replaying the settlement doesn't double-credit.
+    await paymentService.finalizeDueSettlement(settlement, { paymentId: `pay_due_${mech._id}` });
+    wallet = await walletService.getWallet(mech._id);
+    assert.strictEqual(wallet.balance, 0);
   });
 
   await scenario('flexible charges: extra tax + discount reflected in bill & split', async () => {
@@ -328,6 +425,37 @@ async function main() {
     assert.strictEqual(second.duplicate, true);
     const wallet = await walletService.getWallet(mech._id);
     assert.strictEqual(wallet.balance, 1000);
+  });
+
+  await scenario('SECURITY: mobile register cannot self-provision a privileged role', async () => {
+    for (const role of ['superadmin', 'admin']) {
+      const res = await request(app)
+        .post('/api/auth/mobile/register')
+        .send({ idToken: 'x.y.z', role, name: 'Attacker', phone: '+910000000000' });
+      assert.strictEqual(res.status, 400, `role=${role} must be rejected by validation`);
+    }
+    const privileged = await User.countDocuments({ role: { $in: ['admin', 'superadmin'] } });
+    assert.strictEqual(privileged, 0, 'no privileged account may be created via mobile register');
+  });
+
+  await scenario('SECURITY: mobile login blocks operator-injection, missing token, and fails closed', async () => {
+    // $-operator payload is stripped by the sanitizer; an invalid role is rejected.
+    const inj = await request(app)
+      .post('/api/auth/mobile/login')
+      .send({ firebaseUid: { $ne: null }, role: 'superadmin' });
+    assert.strictEqual(inj.status, 400);
+    assert.ok(!inj.body?.data?.accessToken, 'no token may be issued');
+
+    // A missing idToken is rejected — the server never trusts a bare uid.
+    const noToken = await request(app).post('/api/auth/mobile/login').send({ role: 'customer' });
+    assert.strictEqual(noToken.status, 400);
+
+    // An unverifiable token fails closed (no session minted) rather than open.
+    const failClosed = await request(app)
+      .post('/api/auth/mobile/login')
+      .send({ idToken: 'not-a-real-token', role: 'customer' });
+    assert.strictEqual(failClosed.body.success, false);
+    assert.ok(!failClosed.body?.data?.accessToken);
   });
 
   console.log(`\nResult: ${passed} passed, ${failed} failed`);

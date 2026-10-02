@@ -17,7 +17,7 @@ const StatusBadge = ({ status }: { status: string }) => {
     case 'PENDING':
       return <span className="flex items-center text-xs font-bold text-yellow-600 bg-yellow-100 px-2 py-1 rounded"><Clock className="w-3 h-3 mr-1" /> PENDING</span>;
     default:
-      return <span className="flex items-center text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded">NOT SUBMITTED</span>;
+      return <span className="flex items-center text-xs font-bold text-ink/50 bg-black/[0.05] px-2 py-1 rounded-md">NOT SUBMITTED</span>;
   }
 };
 
@@ -75,15 +75,15 @@ export default function DocumentVerificationScreen() {
     const isUploading = uploadingDoc === type;
 
     return (
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mb-6">
-        <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-          <h2 className="font-bold text-gray-800">{title}</h2>
+      <div className="bg-white rounded-2xl shadow-sm overflow-hidden mb-5">
+        <div className="p-4 border-b border-black/[0.05] flex justify-between items-center bg-primary-tint/40">
+          <h2 className="font-extrabold text-ink">{title}</h2>
           <StatusBadge status={status} />
         </div>
-        
+
         <div className="p-4">
           {doc?.documentUrl && (
-            <div className="mb-4 relative rounded-xl overflow-hidden border border-gray-200 bg-gray-50 flex items-center justify-center h-48">
+            <div className="mb-4 relative rounded-xl overflow-hidden border border-black/[0.06] bg-cream flex items-center justify-center h-48">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={doc.documentUrl} alt={title} className="object-contain w-full h-full" />
             </div>
@@ -105,7 +105,7 @@ export default function DocumentVerificationScreen() {
               fullWidth
               isLoading={isUploading}
               onClick={() => handleCapture(type)}
-              className={isRejected ? '' : 'border-dashed border-2 border-gray-300 text-gray-600 hover:border-primary hover:text-primary'}
+              className={isRejected ? '' : 'border-dashed border-2 border-primary/25 text-primary/70'}
             >
               <Camera className="w-4 h-4 mr-2" />
               {isRejected ? 'Retake Document' : 'Capture Document'}
@@ -113,7 +113,7 @@ export default function DocumentVerificationScreen() {
           )}
 
           {isPending && (
-            <p className="text-sm text-center text-gray-500 italic">
+            <p className="text-sm text-center font-medium text-ink/50">
               Your document is currently under review by our team.
             </p>
           )}
@@ -129,24 +129,25 @@ export default function DocumentVerificationScreen() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50">
-      <div className="bg-white border-b border-gray-200 px-4 py-4 flex items-center sticky top-0 z-10 shadow-sm">
-        <button 
+    <div className="flex flex-col min-h-screen bg-cream">
+      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-black/[0.04] bg-white px-4 py-4 shadow-sm">
+        <button
           onClick={() => router.back()}
-          className="p-2 -ml-2 rounded-full hover:bg-gray-100 active:bg-gray-200 transition-colors"
+          className="-ml-2 rounded-full p-2 transition-colors active:bg-black/[0.05]"
+          aria-label="Back"
         >
-          <ChevronLeft className="h-6 w-6 text-gray-700" />
+          <ChevronLeft className="h-6 w-6 text-ink" />
         </button>
-        <h1 className="text-xl font-bold text-gray-900 ml-2">Document Verification</h1>
+        <h1 className="text-xl font-extrabold text-ink">Document Verification</h1>
       </div>
 
-      <div className="p-6 pb-12 overflow-y-auto">
-        <p className="text-gray-600 text-sm mb-6 leading-relaxed">
+      <div className="p-5 pb-12 overflow-y-auto">
+        <p className="mb-6 text-sm font-medium leading-relaxed text-ink/55">
           Please upload clear, legible photos of your identity documents. Verification usually takes 24-48 hours.
         </p>
 
         {error && (
-          <div className="mb-6 p-3 bg-red-50 border border-red-200 text-red-600 rounded-lg text-sm text-center font-medium">
+          <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-3 text-center text-sm font-medium text-red-600">
             {error}
           </div>
         )}

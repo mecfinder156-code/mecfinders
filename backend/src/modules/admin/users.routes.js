@@ -15,6 +15,7 @@ router.use(authorize(ROLES.SUPERADMIN, ROLES.ADMIN));
 router.get('/', usersController.getUsers);
 router.get('/:id', usersController.getUserById);
 router.patch('/:id/status', usersController.updateUserStatus);
+router.patch('/:id/dispatch', usersController.updateMechanicDispatch);
 router.patch('/:id/documents/:docType/verify', usersController.verifyDocument);
 router.patch('/:id/documents/:docType/reject', usersController.rejectDocument);
 

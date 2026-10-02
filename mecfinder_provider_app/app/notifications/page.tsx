@@ -3,7 +3,10 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
-import { ChevronLeft, Bell } from 'lucide-react';
+import {
+  ChevronLeft, Bell, Wrench, MapPin, Hammer, ReceiptText,
+  PartyPopper, XCircle, Hourglass, IndianRupee, MessageCircle, type LucideIcon,
+} from 'lucide-react';
 import { notificationsApi } from '@/lib/api';
 import { useNotifications } from '@/contexts/NotificationContext';
 
@@ -18,18 +21,18 @@ interface NotificationItem {
   createdAt: string;
 }
 
-// Emoji per notification type — keeps the list scannable.
-const TYPE_ICON: Record<string, string> = {
-  MECHANIC_ASSIGNED: '🔧',
-  MECHANIC_ARRIVED: '📍',
-  WORK_STARTED: '🛠️',
-  READY_FOR_BILLING: '🧾',
-  BOOKING_COMPLETED: '🎉',
-  BOOKING_CANCELLED: '❌',
-  BOOKING_EXPIRED: '⏳',
-  EARNING_ADDED: '💰',
-  SUPPORT_REPLY: '💬',
-  NEW_REQUEST: '🔔',
+// Icon per notification type — keeps the list scannable.
+const TYPE_ICON: Record<string, LucideIcon> = {
+  MECHANIC_ASSIGNED: Wrench,
+  MECHANIC_ARRIVED: MapPin,
+  WORK_STARTED: Hammer,
+  READY_FOR_BILLING: ReceiptText,
+  BOOKING_COMPLETED: PartyPopper,
+  BOOKING_CANCELLED: XCircle,
+  BOOKING_EXPIRED: Hourglass,
+  EARNING_ADDED: IndianRupee,
+  SUPPORT_REPLY: MessageCircle,
+  NEW_REQUEST: Bell,
 };
 
 function timeAgo(iso: string) {
@@ -136,8 +139,8 @@ export default function NotificationsScreen() {
                   n.readAt ? 'border-gray-100 bg-white' : 'border-primary/15 bg-primary-tint/40'
                 }`}
               >
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-tint text-xl">
-                  {TYPE_ICON[n.type] || '🔔'}
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-tint text-primary">
+                  {(() => { const Icon = TYPE_ICON[n.type] || Bell; return <Icon className="h-5 w-5" strokeWidth={2} />; })()}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-2">

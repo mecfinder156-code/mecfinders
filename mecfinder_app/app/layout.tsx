@@ -30,6 +30,7 @@ import { AuthProvider } from "../contexts/AuthContext";
 import { NotificationProvider } from "../contexts/NotificationContext";
 import HardwareBackButtonHandler from "../components/HardwareBackButtonHandler";
 import OfflineOverlay from "../components/OfflineOverlay";
+import { SWRProvider } from "../contexts/SWRProvider";
 
 export default function RootLayout({
   children,
@@ -39,13 +40,15 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${manrope.variable} antialiased`}>
       <body className="font-sans bg-white text-gray-900 overflow-x-hidden min-h-screen">
-        <AuthProvider>
-          <NotificationProvider>
-            <HardwareBackButtonHandler />
-            <OfflineOverlay />
-            {children}
-          </NotificationProvider>
-        </AuthProvider>
+        <SWRProvider>
+          <AuthProvider>
+            <NotificationProvider>
+              <HardwareBackButtonHandler />
+              <OfflineOverlay />
+              {children}
+            </NotificationProvider>
+          </AuthProvider>
+        </SWRProvider>
       </body>
     </html>
   );

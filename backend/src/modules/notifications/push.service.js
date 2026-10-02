@@ -1,6 +1,7 @@
 'use strict';
 
 const logger = require('../../utils/logger');
+const firebase = require('../../config/firebase');
 
 /**
  * Thin wrapper around Firebase Cloud Messaging for background push. FCM is used
@@ -8,33 +9,15 @@ const logger = require('../../utils/logger');
  * provider app for a new request); live in-app state sync is handled by
  * Socket.IO. All calls are best-effort and no-op when Firebase isn't
  * configured, so the booking flow never depends on push delivery.
+ *
+ * Firebase Admin is initialised once in config/firebase.js (shared with mobile
+ * auth token verification) — we never init a second app here.
  */
-
-let admin = null;
-let initialized = false;
-
-function init() {
-  if (initialized) return admin;
-  initialized = true;
-  try {
-    admin = require('firebase-admin');
-    if (!admin.apps.length) {
-      // eslint-disable-next-line import/no-unresolved, global-require
-      const serviceAccount = require('../../config/service-account.json');
-      admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-      logger.info('Firebase Admin initialised for push notifications');
-    }
-  } catch (err) {
-    admin = null;
-    logger.warn(`Push notifications disabled: ${err.message}`);
-  }
-  return admin;
-}
 
 async function send(fcmToken, title, body, data = {}) {
   if (!fcmToken) return false;
-  const fb = init();
-  if (!fb || !fb.apps.length) return false;
+  const fb = firebase.getAdmin();
+  if (!fb) return false;
   try {
     // FCM data values must be strings.
     const stringData = {};
@@ -52,4 +35,4 @@ async function send(fcmToken, title, body, data = {}) {
   }
 }
 
-module.exports = { init, send };
+module.exports = { init: firebase.init, send };

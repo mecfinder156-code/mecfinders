@@ -114,3 +114,11 @@ export const bookingsApi = {
   submitRating: (id: string, data: { rating: number; feedback?: string }) =>
     api.post(`/mobile/bookings/${id}/rating`, data).then((res) => res.data?.data?.rating),
 };
+
+// Admin-editable Privacy Policy / Terms (public). audience fixed to 'customer' here.
+export const legalApi = {
+  get: (type: 'privacy' | 'terms') =>
+    api
+      .get(`/mobile/legal/${type}`, { params: { audience: 'customer' } })
+      .then((res) => res.data?.data?.document),
+};

@@ -3,7 +3,7 @@
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
-import { ArrowLeft, MapPin, Phone, Plus, Check } from 'lucide-react';
+import { ArrowLeft, MapPin, Phone, Plus, Check, Car } from 'lucide-react';
 import { mechanicApi, mechanicServicesApi } from '@/lib/api';
 import { useMechanicLive } from '@/lib/useMechanicLive';
 import { useLocationStream } from '@/lib/useLocationStream';
@@ -27,11 +27,13 @@ function JobContent() {
     () => mechanicApi.getBooking(id as string),
     { refreshInterval: 12000 }
   );
-  useMechanicLive(() => {}, () => mutate(), id);
-
   // The mechanic's own live position, seeded from the GPS stream below so the
   // map can show where they are without a second watcher.
   const [selfLocation, setSelfLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  // The customer's live position, pushed over the socket (customer:location).
+  const [customerLocation, setCustomerLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+
+  useMechanicLive(() => {}, () => mutate(), id, setCustomerLocation);
 
   // Stream GPS to the customer while the job is active.
   useLocationStream(id, TRACKING_STATUSES.includes(booking?.status), setSelfLocation);
@@ -45,8 +47,12 @@ function JobContent() {
     setBusy(true);
     setError('');
     try {
-      await fn();
-      await mutate();
+      const updatedData = await fn();
+      if (updatedData) {
+        mutate(updatedData, { revalidate: false });
+      } else {
+        mutate();
+      }
     } catch (e: any) {
       setError(e?.response?.data?.message || 'Something went wrong.');
     } finally {
@@ -60,11 +66,13 @@ function JobContent() {
   const status = booking.status;
   const services = (booking.services || []).filter((s: any) => s.status !== 'REJECTED');
 
-  const destination =
-    typeof booking.serviceLocation?.latitude === 'number' &&
+  // Customer marker: prefer their live GPS, else the booking's service address.
+  const customerPoint =
+    customerLocation ||
+    (typeof booking.serviceLocation?.latitude === 'number' &&
     typeof booking.serviceLocation?.longitude === 'number'
       ? { latitude: booking.serviceLocation.latitude, longitude: booking.serviceLocation.longitude }
-      : null;
+      : null);
 
   const customerAddress = [booking.serviceLocation?.addressLine1, booking.serviceLocation?.city].filter(Boolean).join(', ');
 
@@ -72,8 +80,10 @@ function JobContent() {
   if (MAP_STATUSES.includes(status)) {
     return (
       <div className="fixed inset-0 bg-[#E9E4D8] overflow-hidden">
-        <div className="absolute inset-0">
-          <LiveTrackingMap self={selfLocation} destination={destination} statusText={status === 'MECHANIC_ARRIVED' ? 'You have arrived' : 'Navigating to customer'} />
+        {/* z-0 isolates Leaflet's internal panes/controls (z-index up to 1000)
+            so the map stays below the z-10 bottom sheet instead of covering it. */}
+        <div className="absolute inset-0 z-0">
+          <LiveTrackingMap self={selfLocation} customer={customerPoint} statusText={status === 'MECHANIC_ARRIVED' ? 'You have arrived' : 'Navigating to customer'} />
         </div>
 
         {/* Floating back button */}
@@ -107,7 +117,7 @@ function JobContent() {
             <div className="min-w-0">
               <p className="font-extrabold text-ink truncate">{booking.customer?.name || 'Customer'}</p>
               <p className="text-sm text-ink/55 flex items-center gap-1 mt-0.5"><MapPin className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{customerAddress || 'Destination'}</span></p>
-              <p className="text-xs text-ink/45 mt-1">🚗 {[booking.vehicle?.make, booking.vehicle?.model, booking.vehicle?.registrationNumber].filter(Boolean).join(' · ')}</p>
+              <p className="text-xs text-ink/45 mt-1 flex items-center gap-1"><Car className="w-3.5 h-3.5 shrink-0" /> {[booking.vehicle?.make, booking.vehicle?.model, booking.vehicle?.registrationNumber].filter(Boolean).join(' · ')}</p>
             </div>
             {booking.customer?.phone && (
               <a href={`tel:${booking.customer.phone}`} className="w-12 h-12 shrink-0 rounded-full bg-green-500 text-white flex items-center justify-center active:scale-95 transition-transform ml-3"><Phone className="w-5 h-5" /></a>
@@ -160,7 +170,7 @@ function JobContent() {
               <a href={`tel:${booking.customer.phone}`} className="w-10 h-10 rounded-full bg-green-500 text-white flex items-center justify-center"><Phone className="w-5 h-5" /></a>
             )}
           </div>
-          <p className="text-sm text-ink/55 mt-2">🚗 {[booking.vehicle?.make, booking.vehicle?.model, booking.vehicle?.registrationNumber].filter(Boolean).join(' · ')}</p>
+          <p className="text-sm text-ink/55 mt-2 flex items-center gap-1.5"><Car className="w-4 h-4 shrink-0" /> {[booking.vehicle?.make, booking.vehicle?.model, booking.vehicle?.registrationNumber].filter(Boolean).join(' · ')}</p>
         </div>
 
         {/* Live location sharing indicator */}

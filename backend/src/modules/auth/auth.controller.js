@@ -9,10 +9,8 @@ const ApiResponse = require('../../utils/ApiResponse');
  * Login with email and password (Admin/SuperAdmin).
  */
 const login = catchAsync(async (req, res) => {
-  console.log('Login controller hit:', req.body);
   const { email, password } = req.body;
   const user = await authService.login(email, password, res);
-  console.log('Login service success');
   ApiResponse.success(res, { user }, 'Login successful');
 });
 
@@ -21,9 +19,11 @@ const login = catchAsync(async (req, res) => {
  * Refresh the access token using the refresh token cookie.
  */
 const refresh = catchAsync(async (req, res) => {
-  const refreshToken = req.cookies.refreshToken;
-  const user = await authService.refresh(refreshToken, res);
-  ApiResponse.success(res, { user }, 'Token refreshed');
+  // Browser (admin panel) sends the refresh token as an httpOnly cookie; the
+  // native mobile apps have no cookie jar, so they send it in the body.
+  const refreshToken = req.cookies.refreshToken || req.body.refreshToken;
+  const result = await authService.refresh(refreshToken, res);
+  ApiResponse.success(res, result, 'Token refreshed');
 });
 
 /**

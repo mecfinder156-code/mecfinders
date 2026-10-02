@@ -18,7 +18,7 @@ interface AuthContextType {
   profile: Profile | null;
   loading: boolean;
   login: (phone: string) => Promise<{ verificationId: string }>;
-  verifyOtp: (otp: string, verificationId: string) => Promise<void>;
+  verifyOtp: (otp: string, verificationId: string) => Promise<{ exists: boolean }>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -30,19 +30,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const loadProfile = async (firebaseUid?: string) => {
+  const loadProfile = async (firebaseUid?: string): Promise<boolean> => {
     try {
       if (!firebaseUid) {
         setProfile(null);
-        return;
+        return false;
       }
-      
+
       const current = await FirebaseAuthentication.getCurrentUser();
-      const phone = current.user?.phoneNumber;
-      
+      if (!current.user) {
+        setProfile(null);
+        await Preferences.remove({ key: 'accessToken' });
+        return false;
+      }
+
+      // Send the VERIFIED Firebase ID token — the backend derives uid/phone from
+      // it and never trusts client-supplied identity.
+      const { token: idToken } = await FirebaseAuthentication.getIdToken();
+
       const response = await api.post('/auth/mobile/login', {
-        firebaseUid: firebaseUid,
-        phone: phone,
+        idToken,
         role: 'customer'
       });
 
@@ -56,14 +63,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (responseData.accessToken) {
           await Preferences.set({ key: 'accessToken', value: responseData.accessToken });
         }
+        return true;
       } else {
         setProfile(null);
         await Preferences.remove({ key: 'accessToken' });
+        return false;
       }
     } catch (e) {
       console.error('Error loading profile', e);
       setProfile(null);
       await Preferences.remove({ key: 'accessToken' });
+      return false;
     }
   };
 
@@ -136,13 +146,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const result = await FirebaseAuthentication.confirmVerificationCode({ verificationId, verificationCode: smsCode });
     if (result.user) {
       setUser(result.user);
-      await loadProfile(result.user.uid);
+      // Returns whether this phone already has a customer account, so the OTP
+      // screen can route to /dashboard (existing) or /register (new).
+      const exists = await loadProfile(result.user.uid);
+      return { exists };
     }
+    return { exists: false };
   };
 
   const logout = async () => {
     await FirebaseAuthentication.signOut();
     await Preferences.remove({ key: 'accessToken' });
+    await Preferences.remove({ key: 'permsOnboarded' }); // re-ask permissions on next login
     setUser(null);
     setProfile(null);
   };

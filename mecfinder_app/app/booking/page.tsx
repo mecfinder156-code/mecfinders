@@ -1,25 +1,61 @@
 "use client";
 
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import useSWR from 'swr';
+import { Capacitor } from '@capacitor/core';
+import { Checkout } from 'capacitor-razorpay';
 import { bookingsApi } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 import { useBookingLive } from '@/lib/useBookingLive';
+import { useLocationStream } from '@/lib/useLocationStream';
 import LiveTrackingMap from '@/components/LiveTrackingMap';
 
 // Statuses during which the customer should see the mechanic moving on a map.
 const TRACKING_STATUSES = ['MECHANIC_ASSIGNED', 'MECHANIC_ARRIVED', 'WORK_STARTED'];
 
+// Load the Razorpay checkout script once, on demand. Without this `window.Razorpay`
+// is undefined and opening checkout throws ("Failed to initiate payment").
+function loadRazorpay(): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined') return resolve(false);
+    if ((window as any).Razorpay) return resolve(true);
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+}
+
 function BookingContent() {
   const searchParams = useSearchParams();
   const id = searchParams.get('id');
   const router = useRouter();
+  const { profile } = useAuth();
 
   // Socket pushes live status + location in real time; the poll is only a
   // slow safety net, so keep it gentle (was 5s — that plus the socket stream
   // was double-fetching every few seconds).
   const { data: booking, error, mutate } = useSWR(id ? `/mobile/bookings/${id}` : null, () => bookingsApi.getById(id as string), { refreshInterval: 20000 });
   const [busy, setBusy] = useState(false);
+
+  // Draggable live-tracking sheet height (fraction of the viewport). The user
+  // can drag it up/down (Rapido-style) to reveal more of the map.
+  const [sheetFrac, setSheetFrac] = useState(0.5);
+  const sheetDrag = useRef<{ y: number; f: number } | null>(null);
+  const onSheetDragStart = (clientY: number) => {
+    sheetDrag.current = { y: clientY, f: sheetFrac };
+  };
+  const onSheetDragMove = (clientY: number) => {
+    if (!sheetDrag.current || typeof window === 'undefined') return;
+    const dy = clientY - sheetDrag.current.y;
+    const next = sheetDrag.current.f - dy / window.innerHeight; // drag up → taller
+    setSheetFrac(Math.max(0.25, Math.min(0.85, next)));
+  };
+  const onSheetDragEnd = () => {
+    sheetDrag.current = null;
+  };
 
   // Live mechanic location: seeded from the booking payload, then updated in
   // real time by the socket stream (falls back to SWR's 5s refetch).
@@ -29,6 +65,10 @@ function BookingContent() {
     () => mutate(),
     (loc) => setLiveLocation(loc)
   );
+
+  // Customer streams its own GPS during tracking so the mechanic sees it live.
+  const [selfLocation, setSelfLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  useLocationStream(id, booking ? TRACKING_STATUSES.includes(booking.status) : false, setSelfLocation);
 
   if (!id) return <Centered>Invalid URL</Centered>;
   if (error) return <Centered>Failed to load booking</Centered>;
@@ -46,19 +86,35 @@ function BookingContent() {
         }
       : null);
 
-  const destination =
-    typeof booking.serviceLocation?.latitude === 'number' &&
+  // The customer's own marker: prefer their live GPS, else the booking's
+  // service address. Shown to the customer and streamed to the mechanic.
+  const customerLocation =
+    selfLocation ||
+    (typeof booking.serviceLocation?.latitude === 'number' &&
     typeof booking.serviceLocation?.longitude === 'number'
       ? {
           latitude: booking.serviceLocation.latitude,
           longitude: booking.serviceLocation.longitude,
         }
-      : null;
+      : null);
 
   // Extract info
   const serviceName = booking.services?.[0]?.name || 'Service';
   const serviceCost = booking.services?.[0]?.priceSnapshot?.totalPrice || booking.bill?.totalAmount || '0';
   const categoryName = booking.services?.[0]?.categoryName || 'CAR WASH';
+
+  // Additional services the mechanic proposed during work; the customer must
+  // approve/reject each one (kind ADDITIONAL + status REQUESTED).
+  const pendingAdditional = (booking.services || []).filter(
+    (s: any) => s.kind === 'ADDITIONAL' && s.status === 'REQUESTED'
+  );
+  const respondAdditional = (itemId: string, accept: boolean) => {
+    setBusy(true);
+    bookingsApi
+      .respondAdditional(id as string, itemId, accept)
+      .then(() => mutate())
+      .finally(() => setBusy(false));
+  };
   
   let title = "Finding a";
   let highlightTitle = "mechanic";
@@ -117,29 +173,66 @@ function BookingContent() {
     setBusy(true);
     try {
       const orderRes = await bookingsApi.pay(id as string, 'RAZORPAY');
-      const { orderId, amount } = orderRes;
-      const options = {
-        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_placeholder',
-        amount: amount,
+      const { orderId, amount, keyId } = orderRes;
+      if (!orderId) throw new Error('Could not create the payment order. Please try again.');
+
+      const options: any = {
+        key: keyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        amount: Math.round(Number(amount) * 100), // Razorpay expects paise
         currency: 'INR',
         name: 'MecFinders',
         description: 'Service Payment',
         order_id: orderId,
-        handler: async function (response: any) {
-          await bookingsApi.verifyRazorpay(id as string, {
-            paymentId: response.razorpay_payment_id,
-            orderId: response.razorpay_order_id,
-            signature: response.razorpay_signature,
-          });
-          mutate();
+        prefill: {
+          name: profile?.name || undefined,
+          email: profile?.email || undefined,
+          contact: profile?.phone || undefined,
         },
         theme: { color: '#6D1B2C' },
       };
-      const rzp = new (window as any).Razorpay(options);
-      rzp.open();
-    } catch (err) {
+
+      const verify = (resp: any) =>
+        bookingsApi.verifyRazorpay(id as string, {
+          paymentId: resp.razorpay_payment_id,
+          orderId: resp.razorpay_order_id,
+          signature: resp.razorpay_signature,
+        });
+
+      if (Capacitor.isNativePlatform()) {
+        // Native Razorpay SDK → full UPI incl. GPay/PhonePe app intent (the web
+        // checkout.js hides UPI inside a WebView).
+        const result: any = await Checkout.open(options);
+        const resp =
+          typeof result?.response === 'string' ? JSON.parse(result.response) : result?.response || result;
+        await verify(resp);
+        mutate();
+      } else {
+        // Web (dev/browser) fallback: checkout.js.
+        const ok = await loadRazorpay();
+        if (!ok) throw new Error('Could not load the payment gateway. Check your connection.');
+        const rzp = new (window as any).Razorpay({
+          ...options,
+          handler: async (response: any) => {
+            try {
+              await verify(response);
+            } finally {
+              mutate();
+            }
+          },
+        });
+        rzp.on('payment.failed', (resp: any) => {
+          alert(resp?.error?.description || 'Payment failed. Please try again.');
+        });
+        rzp.open();
+      }
+    } catch (err: any) {
       console.error(err);
-      alert('Failed to initiate payment');
+      // Native SDK rejects with an error JSON on failure; it also rejects when
+      // the user dismisses checkout — don't nag on a plain cancel.
+      const msg = err?.response?.data?.message || err?.error?.description || err?.message || '';
+      if (msg && !/cancel/i.test(String(msg))) {
+        alert(msg || 'Failed to initiate payment');
+      }
     } finally {
       setBusy(false);
     }
@@ -149,9 +242,12 @@ function BookingContent() {
   if (TRACKING_STATUSES.includes(booking.status)) {
     return (
       <div className="fixed inset-0 bg-[#EEF2F6] overflow-hidden">
-        {/* Full-bleed map fills the screen; the sheet sits on top of it. */}
-        <div className="absolute inset-0">
-          <LiveTrackingMap mechanic={mechanicLocation} destination={destination} statusText={subtitle} />
+        {/* Full-bleed map fills the screen; the sheet sits on top of it.
+            z-0 makes this an isolated stacking context so Leaflet's internal
+            panes/controls (z-index up to 1000) stay contained below the sheet
+            instead of painting over the whole screen. */}
+        <div className="absolute inset-0 z-0">
+          <LiveTrackingMap mechanic={mechanicLocation} customer={customerLocation} statusText={subtitle} />
         </div>
 
         {/* Floating back button */}
@@ -163,9 +259,25 @@ function BookingContent() {
           <svg className="w-5 h-5 pr-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" /></svg>
         </button>
 
-        {/* Bottom sheet */}
-        <div className="absolute bottom-0 left-0 right-0 z-10 bg-white rounded-t-[28px] shadow-[0_-8px_30px_rgb(0,0,0,0.12)] px-6 pt-5 pb-10 max-h-[70vh] overflow-y-auto">
-          <div className="w-10 h-1.5 bg-gray-200 rounded-full mx-auto mb-4" />
+        {/* Bottom sheet — drag the handle up/down to reveal more of the map */}
+        <div
+          className="absolute bottom-0 left-0 right-0 z-10 bg-white rounded-t-[28px] shadow-[0_-8px_30px_rgb(0,0,0,0.12)] px-6 pb-10 overflow-y-auto transition-[height] duration-100"
+          style={{ height: `${Math.round(sheetFrac * 100)}vh` }}
+        >
+          {/* Drag handle (sticky so it stays grabbable while content scrolls) */}
+          <div
+            className="sticky top-0 -mx-6 px-6 pt-3 pb-3 bg-white rounded-t-[28px] cursor-grab active:cursor-grabbing"
+            style={{ touchAction: 'none' }}
+            onTouchStart={(e) => onSheetDragStart(e.touches[0].clientY)}
+            onTouchMove={(e) => onSheetDragMove(e.touches[0].clientY)}
+            onTouchEnd={onSheetDragEnd}
+            onPointerDown={(e) => onSheetDragStart(e.clientY)}
+            onPointerMove={(e) => { if (e.buttons === 1) onSheetDragMove(e.clientY); }}
+            onPointerUp={onSheetDragEnd}
+          >
+            <div className="w-12 h-1.5 bg-gray-300 rounded-full mx-auto" />
+          </div>
+
 
           {/* Status line */}
           <div className="flex items-center gap-2 mb-1">
@@ -196,6 +308,9 @@ function BookingContent() {
               <div key={i} className={`h-1.5 flex-1 rounded-full ${i < activeSteps ? 'bg-[#6D1B2C]' : 'bg-gray-200'}`} />
             ))}
           </div>
+
+          {/* Additional-service approval (mechanic proposed extra work) */}
+          <PendingApproval items={pendingAdditional} busy={busy} onRespond={respondAdditional} />
 
           {/* Mechanic profile */}
           {booking.mechanic && (
@@ -409,25 +524,8 @@ function BookingContent() {
                </div>
             </div>
             
-            {/* Additional Services Approval */}
-            {booking.additionalServicesRequested?.some((s: any) => s.status === 'PENDING') && (
-              <div className="bg-white rounded-[24px] p-5 shadow-[0_4px_25px_rgb(0,0,0,0.03)] border border-[#F5A623] mb-4">
-                <p className="text-[13px] font-black text-gray-400 mb-3">Additional Services Suggested</p>
-                {booking.additionalServicesRequested.filter((s:any) => s.status === 'PENDING').map((s:any) => (
-                   <div key={s._id} className="mb-4">
-                     <div className="flex justify-between items-center mb-1">
-                        <p className="text-[14px] font-black text-[#131F33]">{s.name}</p>
-                        <p className="text-[14px] font-black text-[#131F33]">₹{s.priceSnapshot?.totalPrice}</p>
-                     </div>
-                     {s.reason && <p className="text-[11px] text-gray-500 font-medium mb-3">Reason: {s.reason}</p>}
-                     <div className="flex gap-3">
-                        <button disabled={busy} onClick={() => bookingsApi.respondAdditional(id as string, s._id, false).then(mutate)} className="flex-1 py-3 rounded-[16px] border border-gray-300 font-bold text-[14px] text-gray-700 disabled:opacity-50">Reject</button>
-                        <button disabled={busy} onClick={() => bookingsApi.respondAdditional(id as string, s._id, true).then(mutate)} className="flex-1 py-3 rounded-[16px] bg-[#6D1B2C] text-white font-bold text-[14px] disabled:opacity-50">Approve</button>
-                     </div>
-                   </div>
-                ))}
-              </div>
-            )}
+            {/* Additional Services Approval (also surfaced in the live sheet) */}
+            <PendingApproval items={pendingAdditional} busy={busy} onRespond={respondAdditional} />
 
             {/* Billing */}
             {['READY_FOR_BILLING', 'PAYMENT_PENDING', 'PAID', 'COMPLETED'].includes(booking.status) && booking.bill?.generatedAt && (
@@ -493,6 +591,39 @@ function BillRow({ label, value }: { label: string; value: number }) {
     <div className="flex justify-between items-center py-1.5">
       <span className="text-[13px] text-gray-500 font-medium">{label}</span>
       <span className="text-[13px] font-bold text-[#131F33]">₹{value}</span>
+    </div>
+  );
+}
+
+// Extra services the mechanic proposed mid-job. The customer approves/rejects
+// each; only approved ones get billed.
+function PendingApproval({
+  items,
+  busy,
+  onRespond,
+}: {
+  items: any[];
+  busy: boolean;
+  onRespond: (itemId: string, accept: boolean) => void;
+}) {
+  if (!items.length) return null;
+  return (
+    <div className="bg-white rounded-[24px] p-5 shadow-[0_4px_25px_rgb(0,0,0,0.06)] border border-[#F5A623] mb-4">
+      <p className="text-[13px] font-black text-[#F5A623]">Approval needed</p>
+      <p className="text-[12px] text-gray-500 font-medium mb-3">Your mechanic suggested extra work — approve to add it to the bill.</p>
+      {items.map((s) => (
+        <div key={s._id} className="mb-3 last:mb-0 border-t border-gray-100 pt-3 first:border-t-0 first:pt-0">
+          <div className="flex justify-between items-center mb-1">
+            <p className="text-[14px] font-black text-[#131F33]">{s.name}</p>
+            <p className="text-[14px] font-black text-[#131F33]">₹{s.priceSnapshot?.totalPrice ?? 0}</p>
+          </div>
+          {s.reason && <p className="text-[11px] text-gray-500 font-medium mb-3">Reason: {s.reason}</p>}
+          <div className="flex gap-3">
+            <button disabled={busy} onClick={() => onRespond(s._id, false)} className="flex-1 py-3 rounded-[16px] border border-gray-300 font-bold text-[14px] text-gray-700 disabled:opacity-50">Reject</button>
+            <button disabled={busy} onClick={() => onRespond(s._id, true)} className="flex-1 py-3 rounded-[16px] bg-[#6D1B2C] text-white font-bold text-[14px] disabled:opacity-50">Approve</button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

@@ -24,20 +24,35 @@ app.use(helmet());
 // gzip responses (JSON lists compress well → less bandwidth, lower latency).
 app.use(compression());
 
-// CORS
-const allowedOrigins = [
-  config.cors.adminPanelUrl,
-  'http://localhost',
-  'capacitor://localhost',
-  'http://localhost:3000',
-  'http://localhost:3001'
-];
+// CORS. Browser clients (admin panel) send cookies, so we must NOT reflect an
+// arbitrary origin with credentials. We allow an explicit allow-list (admin
+// panel + CORS_ORIGINS env) plus localhost/Capacitor origins for development.
+// Native mobile apps send no Origin header (and use Bearer tokens, not cookies),
+// so requests with no origin are allowed.
+const allowedOrigins = new Set(
+  [
+    config.cors.adminPanelUrl,
+    ...config.corsOrigins,
+    'http://localhost',
+    'https://localhost',
+    'capacitor://localhost',
+    'ionic://localhost',
+    'http://localhost:3000',
+    'http://localhost:4512',
+    'http://localhost:4513',
+    'http://localhost:4514',
+  ].filter(Boolean)
+);
 
 app.use(
   cors({
-    origin: function (origin, callback) {
-      // Allow all origins dynamically (great for Capacitor/Ngrok development)
-      callback(null, true);
+    origin(origin, callback) {
+      // No Origin → native app / server-to-server / curl: allow.
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.has(origin)) return callback(null, true);
+      // Outside production, stay permissive so on-device / ngrok testing works.
+      if (config.env !== 'production') return callback(null, true);
+      return callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
   })
@@ -45,18 +60,37 @@ app.use(
 
 // Body parsing. Capture the raw body so webhook signatures (Razorpay) can be
 // verified against the exact bytes received.
-app.use(
-  express.json({
-    limit: config.server.jsonBodyLimit,
-    verify: (req, res, buf) => {
-      req.rawBody = buf && buf.length ? buf.toString('utf8') : '';
-    },
-  })
-);
+//
+// A few endpoints accept a base64 image inside the JSON body (register /
+// profile-image / documents), which easily exceeds the small global limit — so
+// those paths get a larger limit while everything else stays capped (DoS guard).
+const captureRawBody = (req, res, buf) => {
+  req.rawBody = buf && buf.length ? buf.toString('utf8') : '';
+};
+const jsonSmall = express.json({ limit: config.server.jsonBodyLimit, verify: captureRawBody });
+const jsonLarge = express.json({ limit: config.server.uploadBodyLimit, verify: captureRawBody });
+const LARGE_BODY_PATHS = [
+  // Mobile: base64 profile photo / KYC document in the JSON body.
+  '/api/auth/mobile/register',
+  '/api/auth/mobile/documents',
+  '/api/auth/mobile/profile-image',
+  // Admin: base64 service image/banner in the JSON body.
+  '/api/admin/services',
+  '/api/admin/mechanic-services',
+];
+app.use((req, res, next) => {
+  const parser = LARGE_BODY_PATHS.some((p) => req.path.startsWith(p)) ? jsonLarge : jsonSmall;
+  return parser(req, res, next);
+});
 app.use(express.urlencoded({ extended: true, limit: config.server.jsonBodyLimit }));
 
 // Cookie parsing
 app.use(cookieParser());
+
+// Strip MongoDB operator-injection payloads ($-prefixed / dotted keys) from
+// body/params/query before anything reaches the data layer.
+const sanitizeRequest = require('./middleware/sanitize');
+app.use(sanitizeRequest);
 
 // HTTP request logging (skip in test)
 if (config.env !== 'test') {
@@ -109,6 +143,14 @@ app.use('/api/admin/mechanic-service-pricing', mechanicServicePricingRoutes);
 const adminBookingRoutes = require('./modules/bookings/booking.admin.routes');
 app.use('/api/admin/bookings', adminBookingRoutes);
 
+// Admin mechanic-wallet payout ledger (earned / paid / outstanding, settle)
+const adminWalletRoutes = require('./modules/wallet/wallet.admin.routes');
+app.use('/api/admin/wallets', adminWalletRoutes);
+
+// Platform settings (max-due threshold, etc.)
+const settingsRoutes = require('./modules/settings/settings.routes');
+app.use('/api/admin/settings', settingsRoutes);
+
 // Customer Mobile App Routes
 const vehicleRoutes = require('./modules/vehicles/vehicle.routes');
 const addressRoutes = require('./modules/addresses/address.routes');
@@ -137,6 +179,12 @@ const supportMobileRoutes = require('./modules/support/support.mobile.routes');
 const supportAdminRoutes = require('./modules/support/support.admin.routes');
 app.use('/api/mobile/support', supportMobileRoutes);
 app.use('/api/admin/support', supportAdminRoutes);
+
+// Legal — admin-editable Privacy Policy & Terms per audience (customer/provider)
+const legalAdminRoutes = require('./modules/legal/legal.admin.routes');
+const legalMobileRoutes = require('./modules/legal/legal.mobile.routes');
+app.use('/api/admin/legal', legalAdminRoutes);
+app.use('/api/mobile/legal', legalMobileRoutes);
 
 // Payment webhooks (public, signature-verified)
 const paymentWebhookRoutes = require('./modules/payments/payment.webhook.routes');

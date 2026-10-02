@@ -4,6 +4,7 @@ const Admin = require('../users/models/admin.model');
 const User = require('../users/models/user.model');
 const ApiError = require('../../utils/ApiError');
 const { ROLES } = require('../../constants/roles');
+const userCache = require('../../utils/userCache');
 
 class AdminService {
   /**
@@ -126,6 +127,7 @@ class AdminService {
     }
 
     await admin.save({ validateBeforeSave: false });
+    await userCache.invalidate(admin._id);
     return admin.toJSON();
   }
 
@@ -143,6 +145,7 @@ class AdminService {
     admin.password = newPassword;
     admin.refreshToken = null; // Force re-login after password reset
     await admin.save();
+    await userCache.invalidate(admin._id);
 
     return admin.toJSON();
   }

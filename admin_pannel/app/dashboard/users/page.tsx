@@ -146,15 +146,22 @@ export default function UsersPage() {
                       </span>
                     </td>
                     <td className="px-6 py-4">
-                      <span
-                        className={`inline-flex px-2.5 py-0.5 text-xs font-medium rounded-full ${
-                          user.isActive
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-red-100 text-red-700'
-                        }`}
-                      >
-                        {user.isActive ? 'Active' : 'Banned'}
-                      </span>
+                      <div className="flex flex-col items-start gap-1">
+                        <span
+                          className={`inline-flex px-2.5 py-0.5 text-xs font-medium rounded-full ${
+                            user.isActive
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-red-100 text-red-700'
+                          }`}
+                        >
+                          {user.isActive ? 'Active' : 'Banned'}
+                        </span>
+                        {user.role === 'mechanic' && user.requestsPaused && (
+                          <span className="inline-flex px-2.5 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700">
+                            Requests paused
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-500">
                       {new Date(user.createdAt).toLocaleDateString()}

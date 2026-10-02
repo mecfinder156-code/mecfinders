@@ -7,7 +7,9 @@ import { Preferences } from '@capacitor/preferences';
  * Used to receive new dispatch offers and live booking updates without polling.
  */
 
-const API_URL = 'https://opacity-twisted-rocklike.ngrok-free.dev/api';
+// Drive the socket origin from the same env var as REST (lib/api.ts) so a
+// release build points at production, not a leftover ngrok tunnel.
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://opacity-twisted-rocklike.ngrok-free.dev/api';
 const SOCKET_ORIGIN = API_URL.replace(/\/api\/?$/, '');
 
 let socket: Socket | null = null;

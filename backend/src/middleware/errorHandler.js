@@ -51,9 +51,14 @@ const errorHandler = (err, req, res, next) => {
     }
   }
 
+  const isProd = process.env.NODE_ENV === 'production';
+
   const response = {
     success: false,
-    message: error.message,
+    // Never leak raw internal error text to clients in production — it can
+    // reveal stack/driver/query details. Client (4xx) messages are safe to show.
+    message:
+      error.statusCode >= 500 && isProd ? 'Internal server error' : error.message,
   };
 
   if (error.errors && error.errors.length > 0) {

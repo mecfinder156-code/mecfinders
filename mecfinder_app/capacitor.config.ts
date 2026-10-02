@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.mechanic.mecfinders',
+  appId: 'com.mecfinder.app',
   appName: 'Mecfinders App',
   webDir: 'out',
   plugins: {

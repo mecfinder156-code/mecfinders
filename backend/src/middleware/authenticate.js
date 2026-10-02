@@ -3,11 +3,23 @@
 const User = require('../modules/users/models/user.model');
 const ApiError = require('../utils/ApiError');
 const { verifyAccessToken } = require('../utils/token');
+const userCache = require('../utils/userCache');
+
+/**
+ * Rehydrate a cached lean user object back into a Mongoose document so write
+ * routes (profile/document updates) can still call `.save()`. Uses the role
+ * discriminator model when known so sub-type paths round-trip correctly.
+ */
+function hydrateUser(obj) {
+  const Model =
+    (obj.role && User.discriminators && User.discriminators[obj.role]) || User;
+  return Model.hydrate(obj);
+}
 
 /**
  * Authentication middleware.
- * Extracts the access token from HTTP-only cookie, verifies it,
- * and attaches the user to req.user.
+ * Extracts the access token from the HTTP-only cookie or Bearer header, verifies
+ * it, loads the user (via a short-TTL cache) and attaches it to req.user.
  */
 const authenticate = async (req, res, next) => {
   try {
@@ -21,7 +33,6 @@ const authenticate = async (req, res, next) => {
       throw ApiError.unauthorized('Authentication required');
     }
 
-    // Verify token
     let decoded;
     try {
       decoded = verifyAccessToken(token);
@@ -32,19 +43,16 @@ const authenticate = async (req, res, next) => {
       throw ApiError.unauthorized('Invalid token');
     }
 
-    // Find user
-    const user = await User.findById(decoded.id);
-
-    if (!user) {
+    // Cached lookup (Redis/in-memory) instead of a DB read on every request.
+    const cached = await userCache.getCachedUser(decoded.id);
+    if (!cached) {
       throw ApiError.unauthorized('User not found');
     }
-
-    if (!user.isActive) {
+    if (!cached.isActive) {
       throw ApiError.forbidden('Account has been deactivated');
     }
 
-    // Attach user to request
-    req.user = user;
+    req.user = hydrateUser(cached);
     next();
   } catch (error) {
     next(error);
@@ -52,4 +60,3 @@ const authenticate = async (req, res, next) => {
 };
 
 module.exports = authenticate;
-

@@ -124,6 +124,24 @@ function initSocket(server) {
       }
     });
 
+    // Customer streams its live location; relay to the booking room so the
+    // assigned mechanic can see where the customer actually is. Relay-only
+    // (not persisted) — it's live-tracking data, the booking already stores the
+    // service address.
+    socket.on(SOCKET_EVENTS.CUSTOMER_LOCATION_UPDATE, (payload = {}) => {
+      if (role !== 'customer') return;
+      const { bookingId, latitude, longitude } = payload;
+      if (typeof latitude !== 'number' || typeof longitude !== 'number') return;
+      if (!bookingId) return;
+      io.to(roomForBooking(bookingId)).emit(SOCKET_EVENTS.CUSTOMER_LOCATION, {
+        bookingId,
+        customerId: userId,
+        latitude,
+        longitude,
+        at: new Date().toISOString(),
+      });
+    });
+
     socket.on('disconnect', () => {
       logger.info(`Socket disconnected: user=${userId} sid=${socket.id}`);
     });

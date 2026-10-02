@@ -4,7 +4,7 @@ require('dotenv').config();
 
 const config = {
   env: process.env.NODE_ENV || 'development',
-  port: parseInt(process.env.PORT, 10) || 5000,
+  port: parseInt(process.env.PORT, 10) || 4511,
 
   mongodb: {
     uri: process.env.MONGODB_URI,
@@ -34,6 +34,10 @@ const config = {
   // Generic server tuning.
   server: {
     jsonBodyLimit: process.env.JSON_BODY_LIMIT || '1mb',
+    // Larger limit for the few endpoints that accept a base64 image in the JSON
+    // body (register/profile-image/documents). Keeps the global limit small
+    // (DoS guard) while letting photo uploads through.
+    uploadBodyLimit: process.env.UPLOAD_BODY_LIMIT || '15mb',
     // Instance id helps identify which process holds the sweeper lock in logs.
     instanceId:
       process.env.INSTANCE_ID ||
@@ -55,7 +59,7 @@ const config = {
   },
 
   cors: {
-    adminPanelUrl: process.env.ADMIN_PANEL_URL || 'http://localhost:3000',
+    adminPanelUrl: process.env.ADMIN_PANEL_URL || 'http://localhost:4512',
   },
 
   razorpay: {
@@ -67,14 +71,39 @@ const config = {
     },
   },
 
+  // Firebase Admin — verifies mobile ID tokens (phone-OTP auth) and sends FCM
+  // push. Credentials come from these env vars OR a config/service-account.json
+  // file. Without them, mobile login/register fail closed (never trust the
+  // client). The private key may contain literal "\n" which we restore at use.
+  firebase: {
+    projectId: process.env.FIREBASE_PROJECT_ID || null,
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL || null,
+    privateKey: process.env.FIREBASE_PRIVATE_KEY || null,
+    get enabled() {
+      return Boolean(this.projectId && this.clientEmail && this.privateKey);
+    },
+  },
+
+  // Comma-separated list of browser origins allowed to call the API with
+  // credentials (admin panel, staging, etc.). The mobile apps use Bearer tokens
+  // (no cookies) so they are allowed separately. Localhost + capacitor origins
+  // are always allowed for development.
+  corsOrigins: (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+
   // Booking dispatch tuning (backend-controlled, not the client).
   dispatch: {
-    // How long each mechanic has to respond to an instant offer.
-    requestTimeoutMs: parseInt(process.env.DISPATCH_REQUEST_TIMEOUT_MS, 10) || 30000,
-    // How often the sweeper checks for expired offers.
-    sweepIntervalMs: parseInt(process.env.DISPATCH_SWEEP_INTERVAL_MS, 10) || 5000,
-    // Max mechanics to search radially (metres) for instant bookings.
-    searchRadiusMeters: parseInt(process.env.DISPATCH_SEARCH_RADIUS_M, 10) || 15000,
+    // How long each mechanic has to respond to an instant offer before it moves
+    // to the next (nearest) mechanic. 10s per the product requirement.
+    requestTimeoutMs: parseInt(process.env.DISPATCH_REQUEST_TIMEOUT_MS, 10) || 10000,
+    // How often the sweeper checks for expired offers. Kept well under the
+    // request timeout so an expired offer rolls to the next mechanic promptly.
+    sweepIntervalMs: parseInt(process.env.DISPATCH_SWEEP_INTERVAL_MS, 10) || 3000,
+    // Max mechanics to search radially (metres) for instant bookings. This is
+    // the DEFAULT; the admin-tunable `dispatchRadiusKm` setting overrides it.
+    searchRadiusMeters: parseInt(process.env.DISPATCH_SEARCH_RADIUS_M, 10) || 10000,
     // Max eligible mechanics to shortlist per booking.
     maxCandidates: parseInt(process.env.DISPATCH_MAX_CANDIDATES, 10) || 20,
     // Max expired offers to process per sweep tick (batched).

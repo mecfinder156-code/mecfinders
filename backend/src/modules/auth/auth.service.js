@@ -12,6 +12,7 @@ const {
 } = require('../../utils/token');
 const config = require('../../config');
 const { ADMIN_ROLES } = require('../../constants/roles');
+const userCache = require('../../utils/userCache');
 
 class AuthService {
   /**
@@ -19,15 +20,11 @@ class AuthService {
    * Returns user data and sets auth cookies on the response.
    */
   async login(email, password, res) {
-    console.log('Finding user...', email);
     // Find user by email, explicitly select password and refreshToken
     const user = await User.findOne({ email, role: { $in: ADMIN_ROLES } })
       .select('+password +refreshToken');
-    
-    console.log('User found:', user ? user.email : 'null');
 
     if (!user) {
-      console.log('Throwing unauthorized error');
       throw ApiError.unauthorized('Invalid email or password');
     }
 
@@ -95,10 +92,12 @@ class AuthService {
     user.refreshToken = hashToken(newRefreshToken);
     await user.save({ validateBeforeSave: false });
 
-    // Set new cookies
+    // Set new cookies (used by the browser admin panel).
     this._setAuthCookies(res, newAccessToken, newRefreshToken);
 
-    return user.toJSON();
+    // Also return the rotated tokens in the body so the native mobile apps —
+    // which use Bearer tokens from storage, not cookies — can persist them.
+    return { user: user.toJSON(), accessToken: newAccessToken, refreshToken: newRefreshToken };
   }
 
   /**
@@ -106,6 +105,7 @@ class AuthService {
    */
   async logout(userId, res) {
     await User.findByIdAndUpdate(userId, { refreshToken: null });
+    await userCache.invalidate(userId);
 
     // Clear cookies
     res.clearCookie('accessToken', { path: '/' });

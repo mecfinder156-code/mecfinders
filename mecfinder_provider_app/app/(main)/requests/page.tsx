@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
-import { MapPin, Clock, Inbox } from 'lucide-react';
+import { MapPin, Clock, Inbox, Wrench } from 'lucide-react';
 import { mechanicApi } from '@/lib/api';
 import { useMechanicLive } from '@/lib/useMechanicLive';
 
@@ -57,7 +57,7 @@ export default function RequestsScreen() {
               <button key={b._id} onClick={() => router.push(`/job?id=${b._id}`)} className="w-full text-left rounded-2xl bg-white p-4 shadow-sm active:scale-[0.99] transition-transform">
                 <div className="mb-3 flex items-start justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary-tint text-2xl">🔧</div>
+                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary-tint text-primary"><Wrench className="h-5 w-5" strokeWidth={1.8} /></div>
                     <div>
                       <h3 className="font-bold text-ink">{original?.name || 'Service'}</h3>
                       <p className="text-sm font-medium text-ink/55">{b.customer?.name}</p>

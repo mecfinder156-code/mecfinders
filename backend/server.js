@@ -6,17 +6,23 @@ const config = require('./src/config');
 const logger = require('./src/utils/logger');
 const { connectDB, disconnectDB } = require('./src/config/database');
 const redis = require('./src/config/redis');
+const firebase = require('./src/config/firebase');
+
+// Initialise Redis first (optional). Enables multi-process scaling for the
+// Socket.IO adapter and the dispatch sweeper leader-lock. No-op without
+// REDIS_URL — the app then runs exactly as a single process.
+redis.initRedis();
+
+// Initialise Firebase Admin early so a missing-credentials misconfiguration is
+// logged at boot (not on the first login) and token verification is ready.
+firebase.init();
+
 const leaderLock = require('./src/utils/leaderLock');
 const app = require('./src/app');
 const { initSocket } = require('./src/realtime/socket');
 const dispatchService = require('./src/modules/bookings/dispatch.service');
 
 const startServer = async () => {
-  // Initialise Redis first (optional). Enables multi-process scaling for the
-  // Socket.IO adapter and the dispatch sweeper leader-lock. No-op without
-  // REDIS_URL — the app then runs exactly as a single process.
-  redis.initRedis();
-
   // Connect to database
   await connectDB(config.mongodb.uri);
 
@@ -57,10 +63,14 @@ const startServer = async () => {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  // Handle unhandled promise rejections
+  // Log unexpected errors but keep serving — a single stray rejection in one
+  // request must NOT take down the process (and every live socket) for all
+  // 5000 users. A process manager (PM2) still restarts on a real hard crash.
   process.on('unhandledRejection', (err) => {
     logger.error('Unhandled Rejection:', err);
-    shutdown('UNHANDLED_REJECTION');
+  });
+  process.on('uncaughtException', (err) => {
+    logger.error('Uncaught Exception:', err);
   });
 };
 

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   User, ShieldCheck, Settings, FileText, Headphones,
-  ChevronRight, LogOut, Camera, Bell, Pencil, CheckCircle2,
+  ChevronRight, LogOut, Camera, Bell, Pencil, CheckCircle2, Landmark, Shield,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotifications } from '@/contexts/NotificationContext';
@@ -80,8 +80,10 @@ export default function ProfileHubScreen() {
   const menuItems = [
     { title: 'Basic Information', description: 'View and edit personal information', icon: User, href: '/profile/basic-info', iconBg: 'bg-blue-50', iconColor: 'text-blue-600' },
     { title: 'Document Verification', description: 'Submit and track identity documents', icon: ShieldCheck, href: '/profile/documents', iconBg: 'bg-green-50', iconColor: 'text-green-600', badge: !verified ? '!' : null, badgeColor: statusColor },
-    { title: 'General Settings', description: 'App preferences and account settings', icon: Settings, href: '/profile/settings', iconBg: 'bg-gray-100', iconColor: 'text-gray-700' },
+    { title: 'Bank & Payouts', description: 'Bank account for receiving earnings', icon: Landmark, href: '/profile/bank-details', iconBg: 'bg-primary-tint', iconColor: 'text-primary' },
+    { title: 'General Settings', description: 'App preferences and account settings', icon: Settings, href: '/profile/settings', iconBg: 'bg-primary-tint', iconColor: 'text-primary' },
     { title: 'Terms & Conditions', description: 'View Mecfinders Terms & Conditions', icon: FileText, href: '/profile/terms', iconBg: 'bg-primary-tint', iconColor: 'text-primary' },
+    { title: 'Privacy Policy', description: 'How we handle your data', icon: Shield, href: '/profile/privacy', iconBg: 'bg-primary-tint', iconColor: 'text-primary' },
     { title: 'Help & Support', description: 'Get help or contact support', icon: Headphones, href: '/profile/help', iconBg: 'bg-orange-50', iconColor: 'text-orange-500' },
   ];
 
@@ -92,8 +94,8 @@ export default function ProfileHubScreen() {
         <div className="pointer-events-none absolute -top-10 right-0 h-40 w-40 rounded-full bg-primary-tint/70 blur-2xl" />
         <div className="relative flex items-start justify-between">
           <div>
-            <h1 className="text-[26px] font-extrabold leading-none text-primary">Mecfinders.in</h1>
-            <p className="mt-1 text-sm text-ink/50">Your Ride, Our Responsibility</p>
+            <h1 className="text-[26px] font-extrabold leading-none text-primary">My Profile</h1>
+            <p className="mt-1 text-sm text-ink/50">Manage your partner account</p>
           </div>
           <button
             onClick={() => router.push('/notifications')}
@@ -159,7 +161,7 @@ export default function ProfileHubScreen() {
             <button
               key={item.title}
               onClick={() => router.push(item.href)}
-              className={`flex w-full items-center p-4 text-left transition-colors active:bg-gray-50 ${index !== menuItems.length - 1 ? 'border-b border-gray-100' : ''}`}
+              className={`flex w-full items-center p-4 text-left transition-colors active:bg-black/[0.03] ${index !== menuItems.length - 1 ? 'border-b border-black/[0.05]' : ''}`}
             >
               <div className={`mr-4 flex h-11 w-11 items-center justify-center rounded-xl ${item.iconBg}`}>
                 <item.icon className={`h-5 w-5 ${item.iconColor}`} />
@@ -180,7 +182,7 @@ export default function ProfileHubScreen() {
           {/* Logout row */}
           <button
             onClick={handleLogout}
-            className="flex w-full items-center border-t border-gray-100 p-4 text-left transition-colors active:bg-red-50"
+            className="flex w-full items-center border-t border-black/[0.05] p-4 text-left transition-colors active:bg-red-50"
           >
             <div className="mr-4 flex h-11 w-11 items-center justify-center rounded-xl bg-primary-tint">
               <LogOut className="h-5 w-5 text-primary" />

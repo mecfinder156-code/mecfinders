@@ -25,7 +25,7 @@ export default function Splash() {
     } else if (user && !profile) {
       router.replace('/register');
     } else {
-      router.replace('/dashboard');
+      router.replace('/permissions');
     }
   }, [user, profile, loading, minElapsed, router]);
 

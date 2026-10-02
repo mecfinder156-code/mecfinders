@@ -1,4 +1,4 @@
-package com.mechanic.mecfinders;
+package com.mecfinder.app;
 
 import com.getcapacitor.BridgeActivity;
 

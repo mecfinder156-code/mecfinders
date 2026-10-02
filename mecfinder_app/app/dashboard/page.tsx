@@ -9,7 +9,19 @@ import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { Preferences } from '@capacitor/preferences';
 import useSWR from 'swr';
-import { categoriesApi, servicesApi } from '@/lib/api';
+import { categoriesApi, servicesApi, bookingsApi } from '@/lib/api';
+
+const ONGOING_LABEL: Record<string, string> = {
+  CREATED: 'Finding a mechanic',
+  SEARCHING_MECHANIC: 'Finding a mechanic',
+  MECHANIC_ASSIGNED: 'Mechanic on the way',
+  MECHANIC_ARRIVED: 'Mechanic has arrived',
+  WORK_STARTED: 'Service in progress',
+  READY_FOR_BILLING: 'Payment pending',
+  PAYMENT_PENDING: 'Payment pending',
+  PAID: 'Finishing up',
+};
+const TERMINAL = ['COMPLETED', 'CANCELLED', 'EXPIRED'];
 
 export default function DashboardScreen() {
   const { profile } = useAuth();
@@ -46,8 +58,7 @@ export default function DashboardScreen() {
   // object and `categories.map(...)` throws.
   const { data: categories = [] } = useSWR(
     '/mobile/categories',
-    () => categoriesApi.getAll().then((res) => res.data || []),
-    { revalidateOnFocus: true }
+    () => categoriesApi.getAll().then((res) => res.data || [])
   );
 
   // Set first category as active initially
@@ -60,10 +71,20 @@ export default function DashboardScreen() {
   // Fetch Original Services based on city and active category
   const servicesKey = activeCategoryId ? `/mobile/services?categoryId=${activeCategoryId}&cityId=${cityId || ''}` : null;
   const { data: servicesResponse } = useSWR(servicesKey, () =>
-    servicesApi.getPublicServices({ vehicleCategoryId: activeCategoryId || undefined, cityId: cityId || undefined }).then(r => r.data), {
-      revalidateOnFocus: true
-  });
+    servicesApi.getPublicServices({ vehicleCategoryId: activeCategoryId || undefined, cityId: cityId || undefined }).then(r => r.data)
+  );
   const originalServices = servicesResponse?.data?.services || [];
+
+  // Ongoing booking so the customer can always resume it (no more "lost on back").
+  const { data: bookingsResp } = useSWR(
+    '/mobile/bookings?ongoing',
+    () => bookingsApi.getAll({ limit: 20 }),
+    { refreshInterval: 20000, revalidateOnFocus: true }
+  );
+  const ongoing = (bookingsResp?.data || []).find((b: any) => !TERMINAL.includes(b.status));
+  const ongoingTitle = ongoing
+    ? (ongoing.services?.find((s: any) => s.kind === 'ORIGINAL') || ongoing.services?.[0])?.name || 'Service'
+    : null;
 
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
@@ -71,11 +92,13 @@ export default function DashboardScreen() {
       {/* Top Section with gradient */}
       <div className="bg-gradient-to-b from-[#F9F5F0] to-white px-4 pt-12 pb-5 rounded-b-3xl">
         <div className="flex justify-between items-start mb-5">
-          <div>
-            <h1 className="text-[26px] font-black text-[#6D1B2C] tracking-tight leading-none">
-              Mecfinders.in
-            </h1>
-            <p className="text-gray-500 text-[13px] font-medium mt-1">Your Ride, Our Responsibility</p>
+          <div className="flex items-center gap-2.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/img/logo.png" alt="Mecfinders" className="h-11 w-11 rounded-xl object-contain" />
+            <div>
+              <h1 className="text-[20px] font-black text-[#6D1B2C] tracking-tight leading-none">Mecfinders.in</h1>
+              <p className="text-gray-500 text-[12px] font-medium mt-0.5">Your Ride, Our Responsibility</p>
+            </div>
           </div>
           <div className="flex gap-3 items-center shrink-0">
             <button
@@ -118,6 +141,30 @@ export default function DashboardScreen() {
           </span>
         </div>
       </div>
+
+      {/* Ongoing service — always resumable */}
+      {ongoing && (
+        <div className="px-4 mt-4">
+          <button
+            onClick={() => router.push(`/booking?id=${ongoing._id}`)}
+            className="w-full text-left rounded-2xl bg-[#6D1B2C] text-white px-4 py-3.5 flex items-center gap-3 shadow-[0_6px_20px_rgb(109,27,44,0.25)] active:scale-[0.99] transition-transform"
+          >
+            <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-white/15 shrink-0">
+              <span className="absolute inline-flex h-2.5 w-2.5 rounded-full bg-[#FBE29F] animate-ping" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#FBE29F]" />
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="text-[11px] font-bold text-white/70 uppercase tracking-wide">Ongoing service</p>
+              <p className="text-[15px] font-black truncate">{ongoingTitle}</p>
+              <p className="text-[12px] font-medium text-white/80 truncate">{ONGOING_LABEL[ongoing.status] || 'In progress'}</p>
+            </div>
+            <span className="shrink-0 bg-[#FBE29F] text-[#5A4510] font-black text-[12px] px-3.5 py-2 rounded-full flex items-center gap-1">
+              Resume
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 5l7 7-7 7" /></svg>
+            </span>
+          </button>
+        </div>
+      )}
 
       {/* Banner */}
       <div className="px-4 mt-4">

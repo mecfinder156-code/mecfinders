@@ -19,9 +19,12 @@ import {
   PenTool,
   CalendarCheck,
   CreditCard,
+  Wallet,
   Star,
   HelpCircle,
   Inbox,
+  Settings,
+  FileText,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -56,9 +59,12 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
     { name: 'Mechanic Services', href: '/dashboard/mechanic-services', icon: PenTool },
     { name: 'Bookings', href: '/dashboard/bookings', icon: CalendarCheck },
     { name: 'Payments', href: '/dashboard/payments', icon: CreditCard },
+    { name: 'Mechanic Wallets', href: '/dashboard/wallet', icon: Wallet },
     { name: 'Ratings', href: '/dashboard/ratings', icon: Star },
     { name: 'Help & Support', href: '/dashboard/support/faqs', icon: HelpCircle },
     { name: 'Support Queries', href: '/dashboard/support/queries', icon: Inbox },
+    { name: 'Legal & Policies', href: '/dashboard/legal', icon: FileText },
+    { name: 'Settings', href: '/dashboard/settings', icon: Settings },
     ...(isSuperAdmin
       ? [{ name: 'Admin Management', href: '/dashboard/admins', icon: UserCog }]
       : []),
@@ -76,11 +82,11 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 transform transition-transform lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-white border-r border-gray-200 transform transition-transform lg:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         } transition-transform duration-200 ease-in-out`}
       >
-        <div className="flex items-center justify-between h-16 px-6 border-b border-gray-200">
+        <div className="flex items-center justify-between h-16 px-6 border-b border-gray-200 shrink-0">
           <div className="flex items-center gap-2">
             <Shield className="h-6 w-6 text-blue-600" />
             <span className="font-bold text-gray-900">MecFinders</span>
@@ -93,7 +99,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
           </button>
         </div>
 
-        <nav className="p-4 space-y-1">
+        <nav className="flex-1 overflow-y-auto p-4 space-y-1">
           {navigation.map((item) => (
             <Link
               key={item.name}
@@ -107,7 +113,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
 
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200">
+        <div className="shrink-0 p-4 border-t border-gray-200">
           <div className="flex items-center gap-3 px-3 py-2 mb-2">
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-900 truncate">

@@ -2,14 +2,20 @@
 
 import { usePathname, useRouter } from 'next/navigation';
 import { LayoutGrid, Inbox, Wallet, Wrench, User } from 'lucide-react';
+import useSWR from 'swr';
+import { mechanicApi } from '@/lib/api';
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
+  // Fetch live requests count for the badge
+  const { data: requests = [] } = useSWR('mechanic/requests', () => mechanicApi.listRequests(), { refreshInterval: 15000 });
+  const requestCount = requests.length;
+
   const navItems = [
     { label: 'Home', path: '/dashboard', icon: LayoutGrid },
-    { label: 'Requests', path: '/requests', icon: Inbox, badge: 2 },
+    { label: 'Requests', path: '/requests', icon: Inbox, badge: requestCount },
     { label: 'Wallet', path: '/wallet', icon: Wallet, center: true },
     { label: 'Services', path: '/services', icon: Wrench },
     { label: 'Profile', path: '/profile', icon: User },
@@ -38,14 +44,14 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                 >
                   <span
                     className={`flex h-14 w-14 items-center justify-center rounded-2xl shadow-lg shadow-primary/30 transition-transform active:scale-95 ${
-                      isActive ? 'bg-primary-dark' : 'bg-primary'
+                      isActive ? 'bg-yellow-500' : 'bg-primary'
                     }`}
                   >
                     <Icon className="h-7 w-7 text-white" strokeWidth={2.2} />
                   </span>
                   <span
                     className={`mt-1 text-[10px] font-bold ${
-                      isActive ? 'text-primary' : 'text-ink/50'
+                      isActive ? 'text-yellow-500' : 'text-ink/50'
                     }`}
                   >
                     {item.label}
@@ -60,18 +66,18 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                 onClick={() => router.push(item.path)}
                 className="relative flex h-full w-16 flex-col items-center justify-center gap-1 transition-colors"
               >
-                <span className="relative">
+                <span className={`relative flex items-center justify-center p-1.5 rounded-full transition-colors ${isActive ? 'bg-yellow-500/15' : ''}`}>
                   <Icon
-                    className={`h-6 w-6 ${isActive ? 'text-primary' : 'text-ink/35'}`}
+                    className={`h-5 w-5 ${isActive ? 'text-yellow-500' : 'text-ink/40'}`}
                     strokeWidth={isActive ? 2.5 : 2}
                   />
                   {item.badge ? (
-                    <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-white">
+                    <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold text-white shadow-sm border border-white">
                       {item.badge}
                     </span>
                   ) : null}
                 </span>
-                <span className={`text-[10px] font-semibold ${isActive ? 'text-primary' : 'text-ink/45'}`}>
+                <span className={`text-[10px] font-semibold transition-all ${isActive ? 'text-yellow-500 font-bold' : 'text-ink/45'}`}>
                   {item.label}
                 </span>
               </button>

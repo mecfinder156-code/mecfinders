@@ -18,12 +18,15 @@ const BOOKING_EVENTS = [
 export function useMechanicLive(
   onRequestsChange: () => void,
   onBookingChange?: () => void,
-  joinBookingId?: string | null
+  joinBookingId?: string | null,
+  onCustomerLocation?: (loc: { latitude: number; longitude: number }) => void
 ) {
   const reqRef = useRef(onRequestsChange);
   const bookRef = useRef(onBookingChange);
+  const locRef = useRef(onCustomerLocation);
   reqRef.current = onRequestsChange;
   bookRef.current = onBookingChange;
+  locRef.current = onCustomerLocation;
 
   useEffect(() => {
     let active = true;
@@ -36,21 +39,35 @@ export function useMechanicLive(
 
         const handleReq = () => reqRef.current?.();
         const handleBook = () => bookRef.current?.();
+        const handleCustomerLoc = (data: any) => {
+          if (data && typeof data.latitude === 'number' && typeof data.longitude === 'number') {
+            locRef.current?.({ latitude: data.latitude, longitude: data.longitude });
+          }
+        };
 
         socket.on(NEW_REQUEST, handleReq);
         socket.on(REQUEST_CLOSED, handleReq);
         BOOKING_EVENTS.forEach((ev) => socket.on(ev, handleBook));
+        socket.on('customer:location', handleCustomerLoc);
 
+        // Re-join the booking room on every (re)connect. Capture the handler so
+        // we can remove it on cleanup — the socket is a shared singleton, so a
+        // leaked `connect` listener would accumulate across navigations.
+        const handleConnect = () => socket.emit('booking:join', joinBookingId);
         if (joinBookingId) {
           socket.emit('booking:join', joinBookingId);
-          socket.on('connect', () => socket.emit('booking:join', joinBookingId));
+          socket.on('connect', handleConnect);
         }
 
         cleanup = () => {
           socket.off(NEW_REQUEST, handleReq);
           socket.off(REQUEST_CLOSED, handleReq);
           BOOKING_EVENTS.forEach((ev) => socket.off(ev, handleBook));
-          if (joinBookingId) socket.emit('booking:leave', joinBookingId);
+          socket.off('customer:location', handleCustomerLoc);
+          if (joinBookingId) {
+            socket.off('connect', handleConnect);
+            socket.emit('booking:leave', joinBookingId);
+          }
         };
       } catch {
         /* socket optional */

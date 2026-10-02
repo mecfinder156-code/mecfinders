@@ -35,7 +35,6 @@ export default function ProfileScreen() {
     { label: 'Personal Information', subtext: 'View and update your profile details', href: '/profile/personal-info', icon: '👤', bg: 'bg-[#F9F5F0]', text: 'text-gray-900' },
     { label: 'My Vehicles', subtext: 'Add, remove and manage your vehicles', href: '/profile/vehicles', icon: '🚗', bg: 'bg-[#F9F5F0]', text: 'text-gray-900' },
     { label: 'My Addresses', subtext: 'Manage home, work and other addresses', href: '/profile/addresses', icon: '📍', bg: 'bg-[#F9F5F0]', text: 'text-gray-900' },
-    { label: 'Settings', subtext: 'App preferences and notifications', href: '/profile/settings', icon: '⚙️', bg: 'bg-[#F9F5F0]', text: 'text-gray-900' },
     { label: 'Help & Support', subtext: 'FAQs, contact us, and more', href: '/profile/support', icon: '🎧', bg: 'bg-[#F9F5F0]', text: 'text-gray-900' },
     { label: 'Terms & Conditions', subtext: 'Read our terms of service', href: '/profile/terms', icon: '📄', bg: 'bg-[#F9F5F0]', text: 'text-gray-900' },
     { label: 'Privacy Policy', subtext: 'Your data and privacy', href: '/profile/privacy', icon: '🛡️', bg: 'bg-[#F9F5F0]', text: 'text-gray-900' },

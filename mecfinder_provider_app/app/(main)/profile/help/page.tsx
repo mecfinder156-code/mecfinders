@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
-import { ChevronLeft, ChevronDown, MessageCircle, Plus, X } from 'lucide-react';
+import { ChevronLeft, ChevronDown, MessageCircle, Plus, X, CheckCircle2 } from 'lucide-react';
 import { supportApi } from '@/lib/api';
 
 interface FaqItem {
@@ -88,8 +88,8 @@ export default function HelpScreen() {
 
       <div className="px-5 pt-5">
         {sent && (
-          <div className="mb-4 rounded-2xl border border-green-100 bg-green-50 px-4 py-3 text-[13px] font-bold text-green-700">
-            ✅ Your query has been submitted. We&apos;ll get back to you soon.
+          <div className="mb-4 flex items-center gap-2 rounded-2xl border border-green-100 bg-green-50 px-4 py-3 text-[13px] font-bold text-green-700">
+            <CheckCircle2 className="h-4 w-4 shrink-0" /> Your query has been submitted. We&apos;ll get back to you soon.
           </div>
         )}
 

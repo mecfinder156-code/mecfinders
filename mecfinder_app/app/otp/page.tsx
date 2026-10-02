@@ -56,9 +56,9 @@ export default function OtpScreen() {
     setLoading(true);
     try {
       const vId = sessionStorage.getItem('temp_verificationId') || '';
-      await verifyOtp(otpString, vId);
-      // Auth context will redirect or we do it here
-      router.push('/dashboard');
+      const { exists } = await verifyOtp(otpString, vId);
+      // Existing customer → permissions gate (then home); brand-new phone → register.
+      router.replace(exists ? '/permissions' : '/register');
     } catch (err) {
       console.error(err);
       setLoading(false);

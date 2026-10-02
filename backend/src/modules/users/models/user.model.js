@@ -158,3 +158,15 @@ userSchema.methods.isPasswordSet = function () {
 const User = mongoose.model('User', userSchema);
 
 module.exports = User;
+
+// Register every role discriminator as soon as the base User model is loaded.
+// `User.create({ role })` (used by mobile register) resolves the sub-model by
+// the `role` discriminator key, which only exists once that role's model file
+// has been required. Previously only `mechanic` was loaded transitively, so
+// creating a `customer` threw `Discriminator "customer" not found for model
+// "User"`. Requiring these AFTER `module.exports` avoids a circular-require
+// deadlock (each discriminator file requires this base model).
+require('./customer.model');
+require('./mechanic.model');
+require('./admin.model');
+require('./superadmin.model');

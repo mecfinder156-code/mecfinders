@@ -83,4 +83,84 @@ function verifyWebhookSignature(rawBody, signature) {
   }
 }
 
-module.exports = { getClient, enabled, createOrder, verifyPaymentSignature, verifyWebhookSignature };
+// ── Razorpay Route (split payments) ─────────────────────────────────────────
+// ONLINE bookings are split at source: the customer pays the platform, then the
+// mechanic's share is transferred to their Route "linked account" and settled
+// to their bank on Razorpay's schedule. The platform's share simply stays in
+// the platform account and settles to the owner's bank normally.
+//
+// Route requires the "Route" product to be enabled on the account and a
+// KYC-approved linked account per mechanic. Every call here is BEST-EFFORT and
+// fails soft (returns {ok:false,...}) so the payment flow never breaks when
+// Route/KYC is not yet set up — the earning is still recorded as PROCESSING and
+// an admin can settle/transfer manually.
+
+/**
+ * Create a Route linked account for a mechanic from their bank details.
+ * Returns { ok, accountId, error }.
+ */
+async function createLinkedAccount({ name, email, phone, bank }) {
+  const rz = getClient();
+  if (!rz) return { ok: false, error: 'Razorpay not configured' };
+  try {
+    const payload = {
+      email: email || undefined,
+      phone: phone || undefined,
+      type: 'route',
+      legal_business_name: name,
+      business_type: 'individual',
+      contact_name: name,
+      profile: { category: 'services', subcategory: 'repair' },
+      legal_info: {},
+    };
+    // The linked-account + bank-account onboarding shape varies by Route
+    // generation and requires KYC; we attempt creation and let it fail soft.
+    const account = await rz.accounts.create(payload);
+    return { ok: true, accountId: account.id, account };
+  } catch (err) {
+    return { ok: false, error: err?.error?.description || err.message };
+  }
+}
+
+/**
+ * Transfer the mechanic's share of a captured payment to their linked account.
+ * Returns { ok, transferId, error }.
+ */
+async function createTransferForPayment(paymentId, linkedAccountId, amountRupees, notes = {}) {
+  const rz = getClient();
+  if (!rz) return { ok: false, error: 'Razorpay not configured' };
+  if (!paymentId || !linkedAccountId) return { ok: false, error: 'Missing payment or account id' };
+  const amountPaise = Math.round(Number(amountRupees) * 100);
+  if (!Number.isFinite(amountPaise) || amountPaise <= 0) {
+    return { ok: false, error: 'Invalid transfer amount' };
+  }
+  try {
+    const result = await rz.payments.transfer(paymentId, {
+      transfers: [
+        {
+          account: linkedAccountId,
+          amount: amountPaise,
+          currency: 'INR',
+          notes,
+          on_hold: false,
+        },
+      ],
+    });
+    // The SDK may return the collection ({items:[...]}) or the array itself.
+    const items = Array.isArray(result) ? result : result?.items || [];
+    const transferId = items[0]?.id || null;
+    return { ok: true, transferId, result };
+  } catch (err) {
+    return { ok: false, error: err?.error?.description || err.message };
+  }
+}
+
+module.exports = {
+  getClient,
+  enabled,
+  createOrder,
+  verifyPaymentSignature,
+  verifyWebhookSignature,
+  createLinkedAccount,
+  createTransferForPayment,
+};

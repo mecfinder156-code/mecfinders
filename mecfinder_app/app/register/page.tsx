@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/Input';
 import Image from 'next/image';
 import { useAuth, Profile } from '../../contexts/AuthContext';
 import { api } from '../../lib/api';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 
 export default function RegistrationScreen() {
   const router = useRouter();
@@ -28,22 +29,23 @@ export default function RegistrationScreen() {
     setGlobalError('');
 
     try {
+      // Identity comes from the verified Firebase token, not client-sent fields.
+      const { token: idToken } = await FirebaseAuthentication.getIdToken();
       const payload: any = {
-        firebaseUid: user.uid,
-        phone: user.phoneNumber,
+        idToken,
         role: 'customer',
         name: formData.fullName,
         profileImage: formData.avatar, // Backend expects profileImage
       };
-      
+
       if (formData.email && formData.email.trim() !== '') {
         payload.email = formData.email.trim();
       }
 
       await api.post('/auth/mobile/register', payload);
-      
+
       await refreshProfile();
-      router.replace('/dashboard');
+      router.replace('/permissions');
     } catch (err: any) {
       console.error(err);
       setGlobalError(err.response?.data?.message || err.message || 'Failed to connect to server');

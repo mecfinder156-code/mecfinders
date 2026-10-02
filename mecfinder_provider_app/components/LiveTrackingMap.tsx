@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from 'react';
-import { Capacitor } from '@capacitor/core';
-import { loadGoogleMaps, isMapsConfigured } from '@/lib/googleMaps';
+import { useEffect, useRef } from 'react';
+import 'leaflet/dist/leaflet.css';
 
 interface LatLng {
   latitude: number;
@@ -12,214 +11,110 @@ interface LatLng {
 interface LiveTrackingMapProps {
   /** The mechanic's own live position (this device). */
   self: LatLng | null;
-  /** The customer / job destination. */
-  destination: LatLng | null;
+  /** The customer's live position (falls back to the service address). */
+  customer: LatLng | null;
   statusText?: string;
 }
 
-const MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '';
-
 /**
- * Provider-side navigation map. Shows the mechanic's own live position and the
- * customer's destination so they can see where they're heading. Native Maps SDK
- * on device (`@capacitor/google-maps`), JS API fallback on web, friendly
- * placeholder when the key is missing / SDK fails.
+ * Interactive navigation map (Leaflet + OpenStreetMap). Pan/zoom works, needs no
+ * Google key (OSM tiles have no referrer restriction so they load in the
+ * WebView), and shows the mechanic (M) and the customer (C) with a line between
+ * them. Auto-fits once, then the mechanic can freely drag it.
  */
-export default function LiveTrackingMap({ self, destination, statusText }: LiveTrackingMapProps) {
-  return Capacitor.isNativePlatform() ? (
-    <NativeMap self={self} destination={destination} statusText={statusText} />
-  ) : (
-    <WebMap self={self} destination={destination} statusText={statusText} />
-  );
-}
-
-/* ---------------- Native (device) ---------------- */
-
-function NativeMap({ self, destination, statusText }: LiveTrackingMapProps) {
+export default function LiveTrackingMap({ self, customer }: LiveTrackingMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
-  const selfMarkerId = useRef<string | null>(null);
-  const destMarkerId = useRef<string | null>(null);
-  const readyRef = useRef(false);
-  const [failed, setFailed] = useState(!MAPS_API_KEY);
+  const LRef = useRef<any>(null);
+  const selfMarker = useRef<any>(null);
+  const custMarker = useRef<any>(null);
+  const lineRef = useRef<any>(null);
+  const fitted = useRef(false);
 
   useEffect(() => {
-    if (!MAPS_API_KEY || !containerRef.current) {
-      setFailed(true);
-      return;
-    }
     let cancelled = false;
-
     (async () => {
-      try {
-        const { GoogleMap } = await import('@capacitor/google-maps');
-        const center = self || destination || { latitude: 20.5937, longitude: 78.9629 };
-        const map = await GoogleMap.create({
-          id: 'provider-tracking-map',
-          element: containerRef.current as HTMLElement,
-          apiKey: MAPS_API_KEY,
-          forceCreate: true,
-          config: { center: { lat: center.latitude, lng: center.longitude }, zoom: 14 },
-        });
-        if (cancelled) {
-          await map.destroy();
-          return;
-        }
-        mapRef.current = map;
-        readyRef.current = true;
-        await sync();
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
+      const L = (await import('leaflet')).default as any;
+      if (cancelled || !containerRef.current || mapRef.current) return;
+      LRef.current = L;
+      const c = self || customer || { latitude: 20.5937, longitude: 78.9629 };
+      const map = L.map(containerRef.current, { zoomControl: true, attributionControl: false }).setView(
+        [c.latitude, c.longitude],
+        14
+      );
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+      mapRef.current = map;
+      syncMarkers();
+      setTimeout(() => map.invalidateSize(), 150);
+      setTimeout(() => map.invalidateSize(), 500);
     })();
-
     return () => {
       cancelled = true;
-      readyRef.current = false;
-      const m = mapRef.current;
-      mapRef.current = null;
-      if (m) m.destroy().catch(() => {});
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (readyRef.current) sync();
+    syncMarkers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [self?.latitude, self?.longitude, destination?.latitude, destination?.longitude]);
+  }, [self?.latitude, self?.longitude, customer?.latitude, customer?.longitude]);
 
-  async function sync() {
+  function pin(color: string, label: string) {
+    const L = LRef.current;
+    return L.divIcon({
+      className: '',
+      html: `<div style="background:${color};width:28px;height:28px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;">
+               <span style="transform:rotate(45deg);color:#fff;font-weight:800;font-size:12px;">${label}</span>
+             </div>`,
+      iconSize: [28, 28],
+      iconAnchor: [14, 28],
+    });
+  }
+
+  function syncMarkers() {
+    const L = LRef.current;
     const map = mapRef.current;
-    if (!map) return;
-    try {
-      if (destination && !destMarkerId.current) {
-        destMarkerId.current = await map.addMarker({
-          coordinate: { lat: destination.latitude, lng: destination.longitude },
-          title: 'Customer',
-          tintColor: { r: 19, g: 31, b: 51, a: 1 },
-        });
+    if (!L || !map) return;
+
+    if (self) {
+      const ll = [self.latitude, self.longitude];
+      if (!selfMarker.current) selfMarker.current = L.marker(ll, { icon: pin('#6D1B2C', 'M') }).addTo(map);
+      else selfMarker.current.setLatLng(ll);
+    }
+    if (customer) {
+      const ll = [customer.latitude, customer.longitude];
+      if (!custMarker.current) custMarker.current = L.marker(ll, { icon: pin('#131F33', 'C') }).addTo(map);
+      else custMarker.current.setLatLng(ll);
+    }
+    if (self && customer) {
+      const pts = [
+        [self.latitude, self.longitude],
+        [customer.latitude, customer.longitude],
+      ];
+      if (!lineRef.current) lineRef.current = L.polyline(pts, { color: '#6D1B2C', weight: 4, opacity: 0.7 }).addTo(map);
+      else lineRef.current.setLatLngs(pts);
+    }
+
+    if (!fitted.current) {
+      if (self && customer) {
+        map.fitBounds(
+          [
+            [self.latitude, self.longitude],
+            [customer.latitude, customer.longitude],
+          ],
+          { padding: [60, 60], maxZoom: 16 }
+        );
+        fitted.current = true;
+      } else if (self || customer) {
+        const p = self || customer;
+        map.setView([p!.latitude, p!.longitude], 15);
       }
-      if (self) {
-        if (selfMarkerId.current) {
-          await map.removeMarker(selfMarkerId.current).catch(() => {});
-          selfMarkerId.current = null;
-        }
-        selfMarkerId.current = await map.addMarker({
-          coordinate: { lat: self.latitude, lng: self.longitude },
-          title: 'You',
-          tintColor: { r: 109, g: 27, b: 44, a: 1 },
-        });
-        await map.setCamera({
-          coordinate: { lat: self.latitude, lng: self.longitude },
-          zoom: destination ? 13 : 15,
-          animate: true,
-        });
-      } else if (destination) {
-        await map.setCamera({
-          coordinate: { lat: destination.latitude, lng: destination.longitude },
-          zoom: 15,
-          animate: true,
-        });
-      }
-    } catch {
-      /* best-effort */
     }
   }
 
-  if (failed) return <MapFallback self={self} statusText={statusText} />;
-  return <div ref={containerRef} className="w-full h-full bg-transparent" />;
-}
-
-/* ---------------- Web fallback ---------------- */
-
-function WebMap({ self, destination, statusText }: LiveTrackingMapProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<any>(null);
-  const selfMarkerRef = useRef<any>(null);
-  const destMarkerRef = useRef<any>(null);
-  const mapsRef = useRef<any>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    if (!isMapsConfigured()) {
-      setFailed(true);
-      return;
-    }
-    let cancelled = false;
-    loadGoogleMaps()
-      .then((maps) => {
-        if (cancelled || !containerRef.current) return;
-        mapsRef.current = maps;
-        const center = self || destination || { latitude: 20.5937, longitude: 78.9629 };
-        mapRef.current = new maps.Map(containerRef.current, {
-          center: { lat: center.latitude, lng: center.longitude },
-          zoom: 14,
-          disableDefaultUI: true,
-          zoomControl: true,
-          gestureHandling: 'greedy',
-          clickableIcons: false,
-        });
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const maps = mapsRef.current;
-    const map = mapRef.current;
-    if (!maps || !map) return;
-
-    if (destination) {
-      const pos = { lat: destination.latitude, lng: destination.longitude };
-      if (!destMarkerRef.current) {
-        destMarkerRef.current = new maps.Marker({
-          position: pos, map, title: 'Customer',
-          icon: { path: maps.SymbolPath.CIRCLE, scale: 8, fillColor: '#131F33', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
-        });
-      } else {
-        destMarkerRef.current.setPosition(pos);
-      }
-    }
-    if (self) {
-      const pos = { lat: self.latitude, lng: self.longitude };
-      if (!selfMarkerRef.current) {
-        selfMarkerRef.current = new maps.Marker({
-          position: pos, map, title: 'You',
-          icon: { path: maps.SymbolPath.CIRCLE, scale: 8, fillColor: '#6D1B2C', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
-        });
-      } else {
-        selfMarkerRef.current.setPosition(pos);
-      }
-    }
-    if (self && destination) {
-      const bounds = new maps.LatLngBounds();
-      bounds.extend({ lat: self.latitude, lng: self.longitude });
-      bounds.extend({ lat: destination.latitude, lng: destination.longitude });
-      map.fitBounds(bounds, 80);
-    } else if (self) {
-      map.panTo({ lat: self.latitude, lng: self.longitude });
-    } else if (destination) {
-      map.panTo({ lat: destination.latitude, lng: destination.longitude });
-    }
-  }, [self, destination]);
-
-  if (failed) return <MapFallback self={self} statusText={statusText} />;
-  return <div ref={containerRef} className="w-full h-full" />;
-}
-
-function MapFallback({ self, statusText }: { self: LatLng | null; statusText?: string }) {
-  return (
-    <div className="w-full h-full flex flex-col items-center justify-center bg-[#E9E4D8] text-center px-6">
-      <div className="text-4xl mb-2">🗺️</div>
-      <p className="text-[13px] font-bold text-ink">{statusText || 'Navigating to customer'}</p>
-      <p className="text-[11px] text-ink/50 font-medium mt-1">
-        {self ? 'Your live location is on.' : 'Turn on location to see the route.'}
-      </p>
-    </div>
-  );
+  return <div ref={containerRef} className="w-full h-full" style={{ background: '#E9E4D8' }} />;
 }

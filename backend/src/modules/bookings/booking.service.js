@@ -81,13 +81,27 @@ async function applyTransition(booking, toStatus, { actor = null, event = null, 
 
   // Fire in-app / push notifications for this transition (best-effort).
   const bookingNotifications = require('../notifications/notification.booking');
-  await bookingNotifications.notifyBookingStatus(booking, toStatus, actor);
+  bookingNotifications.notifyBookingStatus(booking, toStatus, actor);
 
   return booking;
 }
 
 async function loadServices(bookingId) {
   return BookingService.find({ bookingId }).sort({ kind: 1, createdAt: 1 });
+}
+
+/** Batch-load services for many bookings at once → Map(String(bookingId) -> [services]). */
+async function loadServicesForBookings(bookingIds) {
+  const rows = await BookingService.find({ bookingId: { $in: bookingIds } })
+    .sort({ kind: 1, createdAt: 1 })
+    .lean();
+  const map = new Map();
+  for (const row of rows) {
+    const k = String(row.bookingId);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(row);
+  }
+  return map;
 }
 
 // --- Authorization helpers ---
@@ -269,14 +283,25 @@ async function listCustomerBookings(customerId, { status, page = 1, limit = 20 }
   if (status) filter.status = status;
   const skip = (page - 1) * limit;
   const [items, total] = await Promise.all([
-    Booking.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+    Booking.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
     Booking.countDocuments(filter),
   ]);
-  const withServices = await Promise.all(
-    items.map(async (b) => {
-      const services = await loadServices(b._id);
-      const mechanic = b.mechanicId ? await User.findById(b.mechanicId) : null;
-      return serializer.forCustomer(b, { services, mechanic });
+  if (!items.length) return { items: [], total, page, limit, pages: Math.ceil(total / limit) };
+
+  // Batch-load services + mechanics in ONE query each (avoids N+1 per booking).
+  const bookingIds = items.map((b) => b._id);
+  const mechanicIds = [...new Set(items.filter((b) => b.mechanicId).map((b) => String(b.mechanicId)))];
+  const [allServices, mechanics] = await Promise.all([
+    BookingService.find({ bookingId: { $in: bookingIds } }).sort({ kind: 1, createdAt: 1 }).lean(),
+    mechanicIds.length ? User.find({ _id: { $in: mechanicIds } }).lean() : [],
+  ]);
+  const servicesByBooking = groupBy(allServices, 'bookingId');
+  const mechById = new Map(mechanics.map((m) => [String(m._id), m]));
+
+  const withServices = items.map((b) =>
+    serializer.forCustomer(b, {
+      services: servicesByBooking.get(String(b._id)) || [],
+      mechanic: b.mechanicId ? mechById.get(String(b.mechanicId)) || null : null,
     })
   );
   return { items: withServices, total, page, limit, pages: Math.ceil(total / limit) };
@@ -287,17 +312,38 @@ async function listMechanicBookings(mechanicId, { status, page = 1, limit = 20 }
   if (status) filter.status = status;
   const skip = (page - 1) * limit;
   const [items, total] = await Promise.all([
-    Booking.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+    Booking.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
     Booking.countDocuments(filter),
   ]);
-  const withServices = await Promise.all(
-    items.map(async (b) => {
-      const services = await loadServices(b._id);
-      const customer = await User.findById(b.customerId);
-      return serializer.forMechanic(b, { services, customer });
+  if (!items.length) return { items: [], total, page, limit, pages: Math.ceil(total / limit) };
+
+  const bookingIds = items.map((b) => b._id);
+  const customerIds = [...new Set(items.map((b) => String(b.customerId)))];
+  const [allServices, customers] = await Promise.all([
+    BookingService.find({ bookingId: { $in: bookingIds } }).sort({ kind: 1, createdAt: 1 }).lean(),
+    User.find({ _id: { $in: customerIds } }).lean(),
+  ]);
+  const servicesByBooking = groupBy(allServices, 'bookingId');
+  const custById = new Map(customers.map((c) => [String(c._id), c]));
+
+  const withServices = items.map((b) =>
+    serializer.forMechanic(b, {
+      services: servicesByBooking.get(String(b._id)) || [],
+      customer: custById.get(String(b.customerId)) || null,
     })
   );
   return { items: withServices, total, page, limit, pages: Math.ceil(total / limit) };
+}
+
+/** Group an array of docs into a Map keyed by String(doc[field]). */
+function groupBy(rows, field) {
+  const map = new Map();
+  for (const row of rows) {
+    const k = String(row[field]);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(row);
+  }
+  return map;
 }
 
 /**
@@ -454,6 +500,7 @@ module.exports = {
   emitUpdate,
   applyTransition,
   loadServices,
+  loadServicesForBookings,
   createBooking,
   getBookingForUser,
   listCustomerBookings,

@@ -71,9 +71,13 @@ export function OTPInput({ length = 6, value, onChange, error }: OTPInputProps) 
           onKeyDown={(e) => handleKeyDown(index, e)}
           onPaste={handlePaste}
           className={`
-            w-12 h-14 text-center text-xl font-bold rounded-xl border-2 transition-colors
-            focus:outline-none focus:ring-0
-            ${error ? 'border-red-500 bg-red-50 text-red-500' : 'border-gray-200 bg-gray-50 focus:border-primary focus:bg-white'}
+            h-14 w-12 rounded-2xl border-2 text-center text-xl font-extrabold text-ink transition-all
+            focus:outline-none focus:ring-4
+            ${error
+              ? 'border-red-400 bg-red-50 text-red-500 focus:ring-red-500/15'
+              : digit
+              ? 'border-primary bg-primary-tint/40 focus:ring-primary/15'
+              : 'border-black/[0.08] bg-white focus:border-primary focus:ring-primary/15'}
           `}
         />
       ))}

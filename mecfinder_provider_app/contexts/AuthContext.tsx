@@ -49,11 +49,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       
       const current = await FirebaseAuthentication.getCurrentUser();
-      const phone = current.user?.phoneNumber;
-      
+      if (!current.user) {
+        setProfile(null);
+        return;
+      }
+
+      // Send the VERIFIED Firebase ID token — the backend derives uid/phone from
+      // it and never trusts client-supplied identity.
+      const { token: idToken } = await FirebaseAuthentication.getIdToken();
+
       const response = await api.post('/auth/mobile/login', {
-        firebaseUid: uid,
-        phone: phone,
+        idToken,
         role: 'mechanic'
       });
 
@@ -64,7 +70,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (responseData.accessToken) {
           const { Preferences } = await import('@capacitor/preferences');
           await Preferences.set({ key: 'accessToken', value: responseData.accessToken });
-          
+          // Persist the refresh token too so the API client can silently renew
+          // the short-lived (15m) access token without forcing a re-login.
+          if (responseData.refreshToken) {
+            await Preferences.set({ key: 'refreshToken', value: responseData.refreshToken });
+          }
+
           // Setup push notifications after we have auth token
           const { setupPushNotifications } = await import('@/lib/pushSetup');
           await setupPushNotifications();
@@ -152,7 +163,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
+    // Go offline on the server BEFORE signing out (while the token is valid), so
+    // a logged-out mechanic never receives dispatch offers. Best-effort.
+    try {
+      await api.patch('/mobile/mechanic/availability', { isOnline: false });
+    } catch {
+      /* non-fatal — proceed with logout */
+    }
     await FirebaseAuthentication.signOut();
+    const { Preferences } = await import('@capacitor/preferences');
+    await Preferences.remove({ key: 'accessToken' });
+    await Preferences.remove({ key: 'refreshToken' });
+    await Preferences.remove({ key: 'permsOnboarded' }); // re-ask permissions on next login
     setUser(null);
     setProfile(null);
   };

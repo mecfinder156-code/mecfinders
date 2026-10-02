@@ -35,4 +35,12 @@ router.get('/wallet', ctrl.getWallet);
 router.get('/wallet/transactions', ctrl.getWalletTransactions);
 router.get('/ratings', ctrl.getRatings);
 
+// Payout bank details
+router.get('/bank-details', ctrl.getBankDetails);
+router.put('/bank-details', ctrl.updateBankDetails);
+
+// Platform due settlement (clear cash-collected dues online)
+router.post('/due/settle/initiate', ctrl.initiateDueSettlement);
+router.post('/due/settle/verify', ctrl.verifyDueSettlement);
+
 module.exports = router;

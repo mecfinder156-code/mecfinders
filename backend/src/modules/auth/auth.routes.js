@@ -3,7 +3,7 @@
 const { Router } = require('express');
 const authController = require('./auth.controller');
 const mobileController = require('./mobile.controller');
-const { loginRules } = require('./auth.validators');
+const { loginRules, mobileLoginRules, mobileRegisterRules } = require('./auth.validators');
 const validate = require('../../middleware/validate');
 const authenticate = require('../../middleware/authenticate');
 const { uploadProfile, uploadDocument } = require('../../config/cloudinary');
@@ -14,8 +14,14 @@ const router = Router();
 router.post('/login', loginRules, validate, authController.login);
 router.post('/refresh', authController.refresh);
 
-router.post('/mobile/login', mobileController.login);
-router.post('/mobile/register', uploadProfile.single('profileImageFile'), mobileController.register);
+router.post('/mobile/login', mobileLoginRules, validate, mobileController.login);
+router.post(
+  '/mobile/register',
+  uploadProfile.single('profileImageFile'),
+  mobileRegisterRules,
+  validate,
+  mobileController.register
+);
 
 // Protected routes
 router.post('/logout', authenticate, authController.logout);

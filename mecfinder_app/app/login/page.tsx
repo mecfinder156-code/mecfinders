@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function LoginScreen() {
@@ -78,7 +79,7 @@ export default function LoginScreen() {
         </form>
 
         <p className="text-[11px] text-gray-400 font-medium text-center mt-8">
-          By continuing, you agree to our <span className="text-[#6D1B2C] font-bold">Terms of Service</span><br/>and <span className="text-[#6D1B2C] font-bold">Privacy Policy</span>.
+          By continuing, you agree to our <Link href="/terms" className="text-[#6D1B2C] font-bold">Terms of Service</Link><br/>and <Link href="/privacy" className="text-[#6D1B2C] font-bold">Privacy Policy</Link>.
         </p>
       </div>
 

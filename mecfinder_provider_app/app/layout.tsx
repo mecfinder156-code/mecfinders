@@ -5,6 +5,7 @@ import NativeAppHandler from "@/components/NativeAppHandler";
 import OfflineOverlay from "@/components/OfflineOverlay";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { NotificationProvider } from "@/contexts/NotificationContext";
+import { SWRProvider } from "@/contexts/SWRProvider";
 
 const manrope = Manrope({
   variable: "--font-manrope",
@@ -24,13 +25,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${manrope.variable} h-full antialiased`}
     >
       <body className="font-sans min-h-full flex flex-col bg-cream text-ink">
-        <NativeAppHandler />
-        <OfflineOverlay />
-        <AuthProvider>
-          <NotificationProvider>
-            {children}
-          </NotificationProvider>
-        </AuthProvider>
+        <SWRProvider>
+          <NativeAppHandler />
+          <OfflineOverlay />
+          <AuthProvider>
+            <NotificationProvider>
+              {children}
+            </NotificationProvider>
+          </AuthProvider>
+        </SWRProvider>
       </body>
     </html>
   );

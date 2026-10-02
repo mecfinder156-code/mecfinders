@@ -90,6 +90,8 @@ const WALLET_TXN_DIRECTION = Object.freeze({
 const WALLET_TXN_TYPE = Object.freeze({
   SERVICE_EARNING: 'SERVICE_EARNING', // the mechanic's earning (service price)
   PLATFORM_DUE: 'PLATFORM_DUE', // cash booking: company's cut the mechanic owes -> DEBIT (negative)
+  DUE_CLEARED: 'DUE_CLEARED', // mechanic paid off their platform due -> CREDIT (clears negative)
+  PAYOUT: 'PAYOUT', // admin paid out a mechanic's online earnings (clears outstanding)
   PLATFORM_FEE: 'PLATFORM_FEE', // company platform fee portion (record only)
   GST: 'GST', // company GST portion (record only)
   CASH_COLLECTION: 'CASH_COLLECTION', // provider collected cash on behalf of platform
@@ -97,6 +99,45 @@ const WALLET_TXN_TYPE = Object.freeze({
   RAZORPAY_SETTLEMENT: 'RAZORPAY_SETTLEMENT', // legacy
   ADJUSTMENT: 'ADJUSTMENT',
   WITHDRAWAL: 'WITHDRAWAL',
+});
+
+// Payout lifecycle of a mechanic's ONLINE service earning. Online bookings are
+// collected into the platform account; the admin then pays the mechanic their
+// earning out-of-band (bank transfer / UPI / cash) and marks it PAID here, which
+// reduces the mechanic's outstanding payable. Cash-booking earnings are never
+// paid out (the mechanic already took the cash) so they stay NA.
+const PAYOUT_STATUS = Object.freeze({
+  NA: 'NA', // not payable (e.g. cash earnings, dues, informational rows)
+  UNPAID: 'UNPAID', // online earning held by platform, owed to the mechanic
+  PAID: 'PAID', // admin has settled this earning to the mechanic
+});
+
+// How the admin paid the mechanic out-of-band (recorded on each payout).
+const PAYOUT_METHOD = Object.freeze({
+  BANK_TRANSFER: 'BANK_TRANSFER',
+  UPI: 'UPI',
+  CASH: 'CASH',
+  OTHER: 'OTHER',
+});
+
+// Settlement status for an ONLINE earning. Online payments split at source via
+// Razorpay Route: the mechanic's share is transferred to their linked account
+// and later SETTLED to their bank on Razorpay's schedule. This tracks that
+// lifecycle WITHOUT ever touching the wallet balance (earnings paid to bank
+// directly, not held in the wallet).
+const SETTLEMENT_STATUS = Object.freeze({
+  NA: 'NA', // not applicable (e.g. cash bookings / dues)
+  PROCESSING: 'PROCESSING', // money captured at Razorpay, payout to bank pending
+  SETTLED: 'SETTLED', // Razorpay settled the transfer to the mechanic's bank
+  FAILED: 'FAILED', // transfer could not be placed / reversed
+});
+
+// Lifecycle of a mechanic's payout bank details + Razorpay Route linked account.
+const BANK_DETAILS_STATUS = Object.freeze({
+  NOT_SUBMITTED: 'NOT_SUBMITTED',
+  PENDING: 'PENDING', // saved; linked-account creation/KYC not completed yet
+  ACTIVE: 'ACTIVE', // linked account ready to receive transfers
+  FAILED: 'FAILED', // linked-account creation failed
 });
 
 // --- Timeline event types (audit trail) ---
@@ -136,11 +177,13 @@ const SOCKET_EVENTS = Object.freeze({
   BILL_GENERATED: 'bill:generated',
   PAYMENT_UPDATED: 'payment:updated',
   MECHANIC_LOCATION: 'mechanic:location',
+  CUSTOMER_LOCATION: 'customer:location',
   NOTIFICATION_NEW: 'notification:new', // in-app notification pushed to a user's room
   // client -> server
   JOIN_BOOKING: 'booking:join',
   LEAVE_BOOKING: 'booking:leave',
   MECHANIC_LOCATION_UPDATE: 'mechanic:location_update',
+  CUSTOMER_LOCATION_UPDATE: 'customer:location_update',
 });
 
 module.exports = {
@@ -155,6 +198,10 @@ module.exports = {
   PAYMENT_STATUS,
   WALLET_TXN_DIRECTION,
   WALLET_TXN_TYPE,
+  PAYOUT_STATUS,
+  PAYOUT_METHOD,
+  SETTLEMENT_STATUS,
+  BANK_DETAILS_STATUS,
   TIMELINE_EVENT,
   SOCKET_EVENTS,
 };

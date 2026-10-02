@@ -28,6 +28,10 @@ export default function BookingSheet({ service, onClose, initialType = 'instant'
   const [bookingRef, setBookingRef] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  // "Use my current location" option (GPS) as an alternative to a saved address.
+  const [useCurrentLocation, setUseCurrentLocation] = useState(false);
+  const [liveLocation, setLiveLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locating, setLocating] = useState(false);
 
   const { data: addresses } = useSWR(open ? '/mobile/addresses' : null, fetchAddresses);
   const { data: vehicles } = useSWR(open ? '/mobile/vehicles' : null, fetchVehicles);
@@ -39,6 +43,8 @@ export default function BookingSheet({ service, onClose, initialType = 'instant'
     setBookingType(initialType);
     setDate('');
     setTime('');
+    setUseCurrentLocation(false);
+    setLiveLocation(null);
   }, [open, service?._id, initialType]);
 
   useEffect(() => {
@@ -55,9 +61,31 @@ export default function BookingSheet({ service, onClose, initialType = 'instant'
   useBackHandler(open, () => handleClose());
 
   const scheduleReady = bookingType === 'instant' || (!!date && !!time);
-  const canConfirm = !!addressId && !!vehicleId && scheduleReady;
+  const locationReady = useCurrentLocation ? !!liveLocation : !!addressId;
+  const canConfirm = locationReady && !!vehicleId && scheduleReady;
 
   const price = service?.pricing?.totalPrice || 0;
+
+  // Fetch the device's GPS and use it as the service location.
+  const detectLocation = async () => {
+    setLocating(true);
+    setError('');
+    try {
+      const { Geolocation } = await import('@capacitor/geolocation');
+      let perm = await Geolocation.checkPermissions();
+      if (perm.location !== 'granted' && perm.coarseLocation !== 'granted') {
+        perm = await Geolocation.requestPermissions({ permissions: ['location'] });
+      }
+      const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
+      setLiveLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+      setUseCurrentLocation(true);
+      setAddressId(null);
+    } catch (e: any) {
+      setError('Could not get your location. Allow location permission and try again.');
+    } finally {
+      setLocating(false);
+    }
+  };
 
   const selectedAddress = useMemo(
     () => addresses?.find((a: any) => a._id === addressId),
@@ -73,8 +101,16 @@ export default function BookingSheet({ service, onClose, initialType = 'instant'
         serviceId: service._id,
         vehicleId: vehicleId as string,
         bookingType: bookingType === 'instant' ? 'INSTANT' : 'SCHEDULED',
-        addressId: addressId as string,
       };
+      if (useCurrentLocation && liveLocation) {
+        payload.liveLocation = {
+          latitude: liveLocation.latitude,
+          longitude: liveLocation.longitude,
+          addressLine1: 'Current location',
+        };
+      } else {
+        payload.addressId = addressId as string;
+      }
       if (bookingType === 'schedule') {
         payload.scheduledAt = new Date(`${date}T${time}`).toISOString();
       }
@@ -98,6 +134,13 @@ export default function BookingSheet({ service, onClose, initialType = 'instant'
       setVehicleId(null);
       setBookingRef('');
     }, 250);
+  };
+
+  // Close the sheet and jump to an add-address / add-vehicle screen. The list
+  // SWR refetches on focus, so a newly added item appears when they reopen.
+  const goTo = (path: string) => {
+    onClose();
+    router.push(path);
   };
 
   if (!open) return null;
@@ -156,16 +199,39 @@ export default function BookingSheet({ service, onClose, initialType = 'instant'
               {/* Address */}
               <div>
                 <p className="text-[13px] font-black text-[#131F33] mb-2">Service Address</p>
+
+                {/* Use current location (GPS) */}
+                <button
+                  type="button"
+                  onClick={detectLocation}
+                  disabled={locating}
+                  className={`w-full mb-2 flex items-center gap-3 p-3 rounded-2xl border transition-colors text-left ${useCurrentLocation ? 'border-[#131F33] bg-[#131F33]/[0.03]' : 'border-gray-200 bg-white'} disabled:opacity-60`}
+                >
+                  <span className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center ${useCurrentLocation ? 'bg-[#131F33] text-white' : 'bg-[#FFF0F2] text-[#6D1B2C]'}`}>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 2v3m0 14v3m10-10h-3M5 12H2m15.07-5.07l-2.12 2.12M9.05 14.95l-2.12 2.12m0-10.14l2.12 2.12m5.9 5.9l2.12 2.12" /><circle cx="12" cy="12" r="3.5" strokeWidth={2.5} /></svg>
+                  </span>
+                  <span className="min-w-0">
+                    <span className="text-[13px] font-bold text-[#131F33] block">
+                      {locating ? 'Getting your location…' : 'Use my current location'}
+                    </span>
+                    <span className="text-[12px] text-gray-500 font-medium block truncate">
+                      {useCurrentLocation && liveLocation
+                        ? `GPS · ${liveLocation.latitude.toFixed(4)}, ${liveLocation.longitude.toFixed(4)}`
+                        : 'Mechanic comes to where you are right now'}
+                    </span>
+                  </span>
+                </button>
+
                 {addresses && addresses.length > 0 ? (
                   <div className="space-y-2">
                     {addresses.map((a: any) => (
                       <button
                         key={a._id}
-                        onClick={() => setAddressId(a._id)}
-                        className={`w-full text-left p-3 rounded-2xl border transition-colors flex gap-3 items-start ${addressId === a._id ? 'border-[#131F33] bg-[#131F33]/[0.03]' : 'border-gray-200 bg-white'}`}
+                        onClick={() => { setAddressId(a._id); setUseCurrentLocation(false); }}
+                        className={`w-full text-left p-3 rounded-2xl border transition-colors flex gap-3 items-start ${addressId === a._id && !useCurrentLocation ? 'border-[#131F33] bg-[#131F33]/[0.03]' : 'border-gray-200 bg-white'}`}
                       >
-                        <span className={`mt-0.5 w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${addressId === a._id ? 'border-[#131F33]' : 'border-gray-300'}`}>
-                          {addressId === a._id && <span className="w-2 h-2 rounded-full bg-[#131F33]" />}
+                        <span className={`mt-0.5 w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${addressId === a._id && !useCurrentLocation ? 'border-[#131F33]' : 'border-gray-300'}`}>
+                          {addressId === a._id && !useCurrentLocation && <span className="w-2 h-2 rounded-full bg-[#131F33]" />}
                         </span>
                         <span className="min-w-0">
                           <span className="text-[13px] font-bold text-[#131F33] block">{a.label || 'Address'}</span>
@@ -173,9 +239,24 @@ export default function BookingSheet({ service, onClose, initialType = 'instant'
                         </span>
                       </button>
                     ))}
+                    <button
+                      type="button"
+                      onClick={() => goTo('/profile/addresses/add')}
+                      className="w-full flex items-center justify-center gap-1.5 text-[13px] font-bold text-[#6D1B2C] py-2.5 active:scale-[0.98] transition-transform"
+                    >
+                      <PlusIcon /> Add another address
+                    </button>
                   </div>
                 ) : (
-                  <p className="text-[12px] text-gray-500 font-medium bg-gray-50 border border-gray-100 rounded-2xl p-3">No saved addresses. Add one from your profile to continue.</p>
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => goTo('/profile/addresses/add')}
+                      className="w-full flex items-center justify-center gap-2 text-[13px] font-bold text-[#131F33] bg-gray-50 border border-dashed border-gray-300 rounded-2xl p-3.5 active:scale-[0.98] transition-transform"
+                    >
+                      <PlusIcon /> Add a saved address
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -195,9 +276,25 @@ export default function BookingSheet({ service, onClose, initialType = 'instant'
                         {v.regNumber && <span className="text-[11px] text-gray-400 font-semibold block mt-0.5">{v.regNumber}</span>}
                       </button>
                     ))}
+                    <button
+                      type="button"
+                      onClick={() => goTo('/profile/vehicles/add')}
+                      className="shrink-0 min-w-[120px] rounded-2xl border border-dashed border-gray-300 bg-gray-50 flex flex-col items-center justify-center gap-1 text-[12px] font-bold text-[#6D1B2C] active:scale-[0.98] transition-transform"
+                    >
+                      <PlusIcon /> Add vehicle
+                    </button>
                   </div>
                 ) : (
-                  <p className="text-[12px] text-gray-500 font-medium bg-gray-50 border border-gray-100 rounded-2xl p-3">No vehicles saved. Add one from your profile to continue.</p>
+                  <div className="space-y-2">
+                    <p className="text-[12px] text-gray-500 font-medium bg-gray-50 border border-gray-100 rounded-2xl p-3">No vehicles saved yet.</p>
+                    <button
+                      type="button"
+                      onClick={() => goTo('/profile/vehicles/add')}
+                      className="w-full flex items-center justify-center gap-2 text-[13px] font-bold text-[#131F33] bg-gray-50 border border-dashed border-gray-300 rounded-2xl p-3.5 active:scale-[0.98] transition-transform"
+                    >
+                      <PlusIcon /> Add a vehicle
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -268,5 +365,13 @@ function Row({ label, value }: { label: string; value?: string }) {
       <span className="text-[12px] text-gray-500 font-semibold">{label}</span>
       <span className="text-[13px] text-[#131F33] font-bold text-right truncate max-w-[60%]">{value}</span>
     </div>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+    </svg>
   );
 }

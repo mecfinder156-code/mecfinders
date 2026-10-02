@@ -1,21 +1,27 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { usersApi, type User, type UserDocument } from '@/lib/api';
+import { usersApi, type UserDocument } from '@/lib/api';
 import useSWR from 'swr';
 import { fetcher } from '@/lib/api';
-import { 
-  ChevronLeft, 
-  CheckCircle, 
-  XCircle, 
-  Clock, 
-  User as UserIcon, 
-  Phone, 
-  Mail, 
+import {
+  ChevronLeft,
+  CheckCircle,
+  XCircle,
+  Clock,
+  User as UserIcon,
+  Phone,
+  Mail,
   Calendar,
   ShieldCheck,
-  ShieldAlert
+  ShieldAlert,
+  Landmark,
+  Wallet,
+  TrendingUp,
+  AlertTriangle,
+  PauseCircle,
+  PlayCircle,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -31,11 +37,31 @@ export default function UserDetailPage() {
   const user = data?.data?.user;
   const vehicles = data?.data?.vehicles || [];
   const addresses = data?.data?.addresses || [];
+  const wallet = data?.data?.wallet as { balance: number; due: number; lifetimeEarnings: number } | null;
   const errorMessage = error?.response?.data?.message || error?.message;
 
   const [rejectingDoc, setRejectingDoc] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const [pauseLoading, setPauseLoading] = useState(false);
+
+  const handleTogglePause = async () => {
+    const next = !user.requestsPaused;
+    if (
+      next &&
+      !confirm('Pause this mechanic? They will stop receiving new service requests until you resume them. Their account stays active.')
+    )
+      return;
+    try {
+      setPauseLoading(true);
+      await usersApi.setDispatchPause(id, next);
+      mutate();
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Failed to update dispatch status.');
+    } finally {
+      setPauseLoading(false);
+    }
+  };
 
   const handleVerify = async (docType: string) => {
     if (!confirm(`Are you sure you want to verify the ${docType} document?`)) return;
@@ -103,23 +129,8 @@ export default function UserDetailPage() {
       </div>
 
       {/* Profile Card */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 md:p-8 mb-8 relative overflow-hidden">
-        {/* Verification Status Banner */}
-        <div className="absolute top-0 right-0 p-4">
-          {isFullyVerified && user.documents?.length ? (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-50 text-green-700 text-sm font-semibold border border-green-200 shadow-sm">
-              <ShieldCheck className="w-4 h-4" />
-              Verified User
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-yellow-50 text-yellow-700 text-sm font-semibold border border-yellow-200 shadow-sm">
-              <ShieldAlert className="w-4 h-4" />
-              Verification Pending
-            </span>
-          )}
-        </div>
-
-        <div className="flex flex-col md:flex-row items-start md:items-center gap-6 mt-4">
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 md:p-8 mb-8">
+        <div className="flex flex-col md:flex-row items-start md:items-center gap-6">
           <div className="w-24 h-24 md:w-32 md:h-32 rounded-full bg-gray-50 flex items-center justify-center overflow-hidden border-2 border-gray-100 shadow-sm shrink-0">
             {user.profileImage ? (
               <img src={user.profileImage} alt={user.name} className="w-full h-full object-cover" />
@@ -127,12 +138,12 @@ export default function UserDetailPage() {
               <UserIcon className="w-12 h-12 md:w-16 md:h-16 text-gray-300" />
             )}
           </div>
-          
+
           <div className="flex-1 w-full">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-4">
               <div>
                 <h1 className="text-2xl md:text-3xl font-bold text-gray-900 tracking-tight">{user.name}</h1>
-                <div className="flex items-center gap-3 mt-2 text-sm">
+                <div className="flex flex-wrap items-center gap-2 mt-2 text-sm">
                   <span className="px-3 py-1 rounded-full font-medium bg-gray-100 text-gray-800 capitalize">
                     {user.role}
                   </span>
@@ -140,10 +151,29 @@ export default function UserDetailPage() {
                     <span className={`w-1.5 h-1.5 rounded-full ${user.isActive ? 'bg-green-600' : 'bg-red-600'}`}></span>
                     {user.isActive ? 'Active' : 'Inactive'}
                   </span>
+                  {user.role === 'mechanic' && user.requestsPaused && (
+                    <span className="px-3 py-1 rounded-full font-medium flex items-center gap-1.5 bg-amber-100 text-amber-800">
+                      <PauseCircle className="w-3.5 h-3.5" />
+                      Requests paused
+                    </span>
+                  )}
                 </div>
               </div>
+              <div className="shrink-0">
+                {isFullyVerified && user.documents?.length ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-50 text-green-700 text-sm font-semibold border border-green-200 shadow-sm">
+                    <ShieldCheck className="w-4 h-4" />
+                    Verified User
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-yellow-50 text-yellow-700 text-sm font-semibold border border-yellow-200 shadow-sm">
+                    <ShieldAlert className="w-4 h-4" />
+                    Verification Pending
+                  </span>
+                )}
+              </div>
             </div>
-            
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-gray-600 mt-6 bg-gray-50 p-4 rounded-xl border border-gray-100">
               <div className="flex items-center gap-3">
                 <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center border border-gray-200">
@@ -180,6 +210,142 @@ export default function UserDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Mechanic: Dispatch control — pause/resume incoming service requests */}
+      {user.role === 'mechanic' && (
+        <div className={`rounded-2xl border p-5 md:p-6 mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${user.requestsPaused ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-200 shadow-sm'}`}>
+          <div className="flex items-start gap-3">
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${user.requestsPaused ? 'bg-amber-100' : 'bg-green-100'}`}>
+              {user.requestsPaused ? (
+                <PauseCircle className="w-5 h-5 text-amber-700" />
+              ) : (
+                <PlayCircle className="w-5 h-5 text-green-700" />
+              )}
+            </div>
+            <div>
+              <h3 className="font-bold text-gray-900">Service Requests</h3>
+              <p className="text-sm text-gray-500 mt-0.5 max-w-md">
+                {user.requestsPaused
+                  ? 'Paused — this mechanic is not being offered new service requests. They can still log in and finish active jobs.'
+                  : 'Active — this mechanic is offered new service requests when online. Pause to stop sending them requests without banning the account.'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleTogglePause}
+            disabled={pauseLoading}
+            className={`shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all disabled:opacity-50 ${
+              user.requestsPaused
+                ? 'bg-green-600 hover:bg-green-700 text-white shadow-sm'
+                : 'bg-amber-500 hover:bg-amber-600 text-white shadow-sm'
+            }`}
+          >
+            {user.requestsPaused ? (
+              <>
+                <PlayCircle className="w-4 h-4" />
+                {pauseLoading ? 'Resuming…' : 'Resume Requests'}
+              </>
+            ) : (
+              <>
+                <PauseCircle className="w-4 h-4" />
+                {pauseLoading ? 'Pausing…' : 'Pause Requests'}
+              </>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* Mechanic: Wallet & Payout details */}
+      {user.role === 'mechanic' && (
+        <div className="mb-8">
+          <h2 className="text-xl font-bold text-gray-900 mb-6">Earnings & Payouts</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
+              <div className="flex items-center gap-2 text-gray-500 mb-2">
+                <TrendingUp className="w-4 h-4 text-green-600" />
+                <span className="text-sm font-medium">Lifetime Earnings</span>
+              </div>
+              <p className="text-2xl font-bold text-gray-900">
+                ₹{(wallet?.lifetimeEarnings ?? 0).toLocaleString('en-IN')}
+              </p>
+            </div>
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
+              <div className="flex items-center gap-2 text-gray-500 mb-2">
+                <Wallet className="w-4 h-4 text-blue-600" />
+                <span className="text-sm font-medium">Wallet Balance</span>
+              </div>
+              <p className={`text-2xl font-bold ${(wallet?.balance ?? 0) < 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                {(wallet?.balance ?? 0) < 0 ? '−' : ''}₹{Math.abs(wallet?.balance ?? 0).toLocaleString('en-IN')}
+              </p>
+            </div>
+            <div className={`rounded-2xl shadow-sm border p-5 ${(wallet?.due ?? 0) > 0 ? 'bg-red-50 border-red-200' : 'bg-white border-gray-200'}`}>
+              <div className="flex items-center gap-2 text-gray-500 mb-2">
+                <AlertTriangle className={`w-4 h-4 ${(wallet?.due ?? 0) > 0 ? 'text-red-600' : 'text-gray-400'}`} />
+                <span className="text-sm font-medium">Platform Due</span>
+              </div>
+              <p className={`text-2xl font-bold ${(wallet?.due ?? 0) > 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                ₹{(wallet?.due ?? 0).toLocaleString('en-IN')}
+              </p>
+            </div>
+          </div>
+
+          {/* Bank / Route linked account */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100 bg-gray-50/80 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Landmark className="w-5 h-5 text-gray-600" />
+                <h3 className="font-bold text-gray-900">Payout Bank Account</h3>
+              </div>
+              {(() => {
+                const status = user.bankDetails?.status || 'NOT_SUBMITTED';
+                if (status === 'ACTIVE')
+                  return <span className="flex items-center gap-1.5 text-green-700 text-sm font-semibold bg-green-50 px-3 py-1 rounded-full border border-green-100"><CheckCircle className="w-4 h-4" /> Active</span>;
+                if (status === 'PENDING')
+                  return <span className="flex items-center gap-1.5 text-yellow-700 text-sm font-semibold bg-yellow-50 px-3 py-1 rounded-full border border-yellow-100"><Clock className="w-4 h-4" /> Verifying</span>;
+                return <span className="text-gray-500 text-sm font-semibold bg-gray-100 px-3 py-1 rounded-full">Not submitted</span>;
+              })()}
+            </div>
+            <div className="p-5">
+              {user.bankDetails?.accountLast4 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Account Holder</p>
+                    <p className="font-medium text-gray-900">{user.bankDetails.accountHolderName || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Account Number</p>
+                    <p className="font-mono font-medium text-gray-900">•••• {user.bankDetails.accountLast4}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">IFSC</p>
+                    <p className="font-medium text-gray-900">{user.bankDetails.ifsc || '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Bank</p>
+                    <p className="font-medium text-gray-900">{user.bankDetails.bankName || '—'}</p>
+                  </div>
+                  {user.bankDetails.razorpayAccountId && (
+                    <div className="sm:col-span-2">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Route Linked Account</p>
+                      <p className="font-mono text-xs text-gray-600">{user.bankDetails.razorpayAccountId}</p>
+                    </div>
+                  )}
+                  {user.bankDetails.status === 'PENDING' && user.bankDetails.statusReason && (
+                    <div className="sm:col-span-2 rounded-lg bg-yellow-50 border border-yellow-100 p-3">
+                      <p className="text-xs text-yellow-800">Route onboarding note: {user.bankDetails.statusReason}</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-gray-500 text-sm">
+                  This mechanic hasn&apos;t added bank details yet. Online earnings can&apos;t be paid out
+                  until they do.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Documents Section */}
       <div className="flex items-center justify-between mb-6">
