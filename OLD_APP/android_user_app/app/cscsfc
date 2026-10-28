@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "137838186054",
+    "project_id": "mecfinders-f3da2",
+    "storage_bucket": "mecfinders-f3da2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:137838186054:android:229a639d941dcb2559c447",
+        "android_client_info": {
+          "package_name": "com.mecfinder"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC-pcoDF-arAjYhZzxVJf1BBfSUFY6U4i8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:137838186054:android:f5c76818024a5dba59c447",
+        "android_client_info": {
+          "package_name": "com.mecfinder.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC-pcoDF-arAjYhZzxVJf1BBfSUFY6U4i8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:137838186054:android:8ba3d654266bdb0759c447",
+        "android_client_info": {
+          "package_name": "com.mecfinder.mechanic"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC-pcoDF-arAjYhZzxVJf1BBfSUFY6U4i8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

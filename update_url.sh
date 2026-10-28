@@ -36,6 +36,12 @@ npm run cap:build
 npm run cap:sync
 cd ..
 
+# 3. Admin Panel
+echo "--> 3. Updating Admin Panel (admin_pannel)..."
+touch admin_pannel/.env.local
+sed -i '/NEXT_PUBLIC_API_URL/d' admin_pannel/.env.local
+echo "NEXT_PUBLIC_API_URL=$API_URL/api" >> admin_pannel/.env.local
+
 echo "==============================================="
-echo "✅ Success! Both apps have been updated & synced."
+echo "✅ Success! All apps have been updated."
 echo "==============================================="

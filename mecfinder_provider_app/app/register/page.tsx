@@ -39,7 +39,8 @@ export default function Register() {
       }
 
       const image = await Camera.getPhoto({
-        quality: 90,
+        quality: 70,
+        width: 1280,
         allowEditing: false,
         resultType: CameraResultType.Base64,
         source: CameraSource.Camera,
